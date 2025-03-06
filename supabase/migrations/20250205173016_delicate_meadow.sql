@@ -1,0 +1,21 @@
+-- Drop the function if it exists
+DROP FUNCTION IF EXISTS delete_order_with_items;
+
+-- Create the function with proper schema and parameters
+CREATE OR REPLACE FUNCTION public.delete_order_with_items(p_order_id uuid)
+RETURNS void
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+BEGIN
+  -- Delete order items first (cascade will handle this automatically, but being explicit)
+  DELETE FROM order_items WHERE order_id = p_order_id;
+  
+  -- Then delete the order
+  DELETE FROM orders WHERE id = p_order_id;
+END;
+$$;
+
+-- Grant execute permission to public since RLS will handle security
+GRANT EXECUTE ON FUNCTION public.delete_order_with_items(uuid) TO public;
