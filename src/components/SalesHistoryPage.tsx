@@ -317,10 +317,7 @@ export function SalesHistoryPage({ currentEmployee, onBack }: SalesHistoryPagePr
     try {
       setIs606Loading(true);
       
-      // First try to use a date range for the selected month
       const [year, month] = reportMonth.split('-').map(Number);
-      
-      // Get the start and end dates for the selected month
       const startDate = new Date(year, month - 1, 1);
       const endDate = new Date(year, month, 0); // Last day of the month
       
@@ -328,43 +325,140 @@ export function SalesHistoryPage({ currentEmployee, onBack }: SalesHistoryPagePr
       const formattedMonth = `${year}${String(month).padStart(2, '0')}`;
       
       console.log(`Generating 606 report for period: ${formattedMonth}`);
+      console.log('Checking database structures for receipts...');
       
-      // First check if we need to create the expenses table
-      const { data: expenses, error: fetchError } = await supabase
-        .from('expenses')
+      let receiptData = null;
+      
+      // First try the simple_receipts table - same as in OperationsPage.tsx
+      console.log('Trying simple_receipts table...');
+      const { data: simpleReceiptsData, error: simpleError } = await supabase
+        .from('simple_receipts')
         .select('*')
-        .gte('fecha', startDate.toISOString())
-        .lte('fecha', endDate.toISOString());
+        .gte('receipt_date', startDate.toISOString())
+        .lte('receipt_date', endDate.toISOString());
         
-      if (fetchError) {
-        console.error('Error fetching expense data:', fetchError);
-        alert('Error accediendo a la base de datos de compras. Verifique su conexión.');
-        setIs606Loading(false);
-        return;
-      }
-      
-      // No purchase data found for this period
-      if (!expenses || expenses.length === 0) {
-        const message = `No hay facturas de compras registradas para el período ${formattedMonth}.\n\n` +
-                        'El reporte 606 requiere que ingrese las facturas de sus proveedores en el sistema.\n\n' +
-                        '¿Desea generar datos de ejemplo para probar el formato del reporte?';
-                
-        // Ask if they want sample data for testing
-        if (window.confirm(message)) {
-          const sampleData = generateSampleExpensesData(year, month);
-          processAndDownloadReport(sampleData, formattedMonth, true);
+      if (!simpleError && simpleReceiptsData && simpleReceiptsData.length > 0) {
+        console.log(`Found ${simpleReceiptsData.length} receipts in simple_receipts table`);
+        // Map fields to the format expected by the report
+        receiptData = simpleReceiptsData.map(item => ({
+          rnc: item.rnc || '',
+          tipo_id: item.tipo_id || '1',
+          tipo_bienes: item.tipo_bienes || '5',
+          ncf: item.ncf || '',
+          ncf_modificado: item.ncf_modificado || '',
+          fecha: item.receipt_date,
+          fecha_pago: item.receipt_date,
+          monto_servicios: item.monto_servicios || 0,
+          monto_bienes: item.monto_bienes || 0,
+          total: item.amount || 0,
+          itbis: item.itbis || (item.amount * 0.18) || 0,
+          itbis_retenido: item.itbis_retenido || 0,
+          itbis_proporcionalidad: item.itbis_proporcionalidad || 0,
+          itbis_costo: item.itbis_costo || 0,
+          itbis_adelantar: item.itbis_adelantar || (item.amount * 0.18) || 0,
+          tipo_retencion_isr: item.tipo_retencion_isr || '',
+          monto_retencion_renta: item.monto_retencion_renta || 0,
+          isr_percibido: item.isr_percibido || 0,
+          impuesto_selectivo: item.impuesto_selectivo || 0,
+          otros_impuestos: item.otros_impuestos || 0,
+          propina_legal: item.propina_legal || 0,
+          forma_pago: item.forma_pago || '03'
+        }));
+      } else {
+        // If no data in simple_receipts, try the expenses table as fallback (like in OperationsPage)
+        console.log('No data in simple_receipts, trying expenses table...');
+        const { data: expensesData, error: expensesError } = await supabase
+          .from('expenses')
+          .select('*')
+          .gte('fecha', startDate.toISOString())
+          .lte('fecha', endDate.toISOString());
+          
+        if (!expensesError && expensesData && expensesData.length > 0) {
+          console.log(`Found ${expensesData.length} expenses records`);
+          // Map fields from expenses table format
+          receiptData = expensesData.map(item => ({
+            rnc: item.rnc || '',
+            tipo_id: item.tipo_id || '1',
+            tipo_bienes: item.tipo_bienes || '5',
+            ncf: item.ncf || '',
+            ncf_modificado: item.ncf_modificado || '',
+            fecha: item.fecha,
+            fecha_pago: item.fecha_pago || item.fecha,
+            monto_servicios: item.monto_servicios || 0,
+            monto_bienes: item.monto_bienes || 0,
+            total: item.total || 0,
+            itbis: item.itbis || 0,
+            itbis_retenido: item.itbis_retenido || 0,
+            itbis_proporcionalidad: item.itbis_proporcionalidad || 0,
+            itbis_costo: item.itbis_costo || 0,
+            itbis_adelantar: item.itbis_adelantar || 0,
+            tipo_retencion_isr: item.tipo_retencion_isr || '',
+            monto_retencion_renta: item.monto_retencion_renta || 0,
+            isr_percibido: item.isr_percibido || 0,
+            impuesto_selectivo: item.impuesto_selectivo || 0,
+            otros_impuestos: item.otros_impuestos || 0,
+            propina_legal: item.propina_legal || 0,
+            forma_pago: item.forma_pago || '03'
+          }));
         } else {
-          setIs606Loading(false);
+          console.log('Trying direct query on operation table...');
+          // As a last attempt, try the operation table that was mentioned
+          const { data: operationData, error: operationError } = await supabase
+            .from('operation')
+            .select('*');
+            
+          if (!operationError && operationData && operationData.length > 0) {
+            console.log(`Found ${operationData.length} operation records`);
+            receiptData = operationData.map(item => ({
+              // Apply similar field mapping, trying different possible field names
+              rnc: item.rnc || '',
+              tipo_id: item.tipo_id || '1',
+              tipo_bienes: item.tipo_bienes || '5',
+              ncf: item.ncf || '',
+              fecha: item.fecha || item.date || item.created_at,
+              fecha_pago: item.fecha_pago || item.fecha || item.date || item.created_at,
+              monto_servicios: item.monto_servicios || 0,
+              monto_bienes: item.monto_bienes || 0,
+              total: item.total || item.amount || 0,
+              itbis: item.itbis || 0,
+              itbis_retenido: item.itbis_retenido || 0,
+              itbis_proporcionalidad: item.itbis_proporcionalidad || 0,
+              itbis_costo: item.itbis_costo || 0,
+              itbis_adelantar: item.itbis_adelantar || 0,
+              tipo_retencion_isr: item.tipo_retencion_isr || '',
+              monto_retencion_renta: item.monto_retencion_renta || 0,
+              isr_percibido: item.isr_percibido || 0,
+              impuesto_selectivo: item.impuesto_selectivo || 0,
+              otros_impuestos: item.otros_impuestos || 0,
+              propina_legal: item.propina_legal || 0,
+              forma_pago: item.forma_pago || '03'
+            }));
+          }
         }
+      }
+      
+      // If we have data from any table, process it
+      if (receiptData && receiptData.length > 0) {
+        console.log(`Successfully found ${receiptData.length} records for the report`);
+        processAndDownloadReport(receiptData, formattedMonth, false);
         return;
       }
       
-      // We have real data from the database - use it for the report
-      console.log(`Found ${expenses.length} expense records in database`);
-      processAndDownloadReport(expenses, formattedMonth, false);
+      // If no data was found in any table, offer sample data
+      console.log('No receipt data found in any table - offering sample data');
+      const message = `No se encontraron datos en la base de datos para el período ${formattedMonth}.\n\n` +
+                      'El reporte 606 requiere que ingrese los recibos de sus proveedores en el sistema.\n\n' +
+                      '¿Desea generar datos de ejemplo para probar el formato del reporte?';
+              
+      if (window.confirm(message)) {
+        const sampleData = generateSampleExpensesData(year, month);
+        processAndDownloadReport(sampleData, formattedMonth, true);
+      } else {
+        setIs606Loading(false);
+      }
     } catch (err) {
       console.error('Error generating 606 report:', err);
-      alert(`Error al generar el reporte 606: ${err.message || 'Intente de nuevo más tarde.'}`);
+      alert(`Error al generar el reporte 606: ${err instanceof Error ? err.message : 'Compruebe la estructura de la base de datos o utilice datos de ejemplo.'}`);
       setIs606Loading(false);
     }
     
