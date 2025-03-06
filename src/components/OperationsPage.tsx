@@ -1,8 +1,11 @@
 import React, { useState, useEffect } from 'react';
-import { PenSquare, Save, X, ChevronDown, ChevronUp, Upload, Trash2, FileDown, DollarSign, Plus, AlertTriangle } from 'lucide-react';
+import { PenSquare, Save, X, ChevronDown, ChevronUp, Upload, Trash2, FileDown, DollarSign, Plus, AlertTriangle, Clipboard, FileScan } from 'lucide-react';
 import { MenuItem } from '../types';
 import { supabase } from '../lib/supabase';
 import { clearAllOrders } from '../lib/orders';
+import Tesseract from 'tesseract.js'; // Add Tesseract.js for OCR
+import { saveAs } from 'file-saver'; // Add file-saver for saving files
+import { OcrProcessor } from './OcrProcessor';
 
 interface OperationsPageProps {
   menuItems: MenuItem[];
@@ -45,6 +48,9 @@ export function OperationsPage({
     description: ''
   });
   const [showClearConfirm, setShowClearConfirm] = useState(false);
+  const [uploadedFile, setUploadedFile] = useState<File | null>(null);
+  const [ocrResult, setOcrResult] = useState<string>('');
+  const [showOcrModal, setShowOcrModal] = useState(false);
 
   // Get unique categories from menu items
   const categories = React.useMemo(() => {
@@ -246,6 +252,11 @@ export function OperationsPage({
     }
   };
 
+  const validateNumericField = (value: number, precision: number, scale: number): boolean => {
+    const maxValue = Math.pow(10, precision - scale) - Math.pow(10, -scale);
+    return Math.abs(value) < maxValue;
+  };
+
   // Simplified to focus on fixing the database insertion first
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -267,14 +278,19 @@ export function OperationsPage({
       if (isNaN(amount)) {
         throw new Error('El monto debe ser un número válido');
       }
+
+      // Validate numeric fields
+      if (!validateNumericField(amount, 12, 2)) {
+        throw new Error('El monto excede el límite permitido');
+      }
       
       // Generate a unique filename but keep it simple for now
       const fileName = `receipt-${Date.now()}.${file.name.split('.').pop()}`;
       
-      // IMPORTANT: Try direct insert with simplified data structure
-      console.log('Testing direct simple insert without select');
+      // Save the file to disk
+      saveAs(file, fileName);
       
-      // Insert into database first (Skip complex table detection) - Extremely simplified
+      // Insert into the simple_receipts table
       const { error } = await supabase
         .from('simple_receipts')
         .insert({
@@ -416,6 +432,27 @@ export function OperationsPage({
            lowerCaseName.endsWith('.png') || 
            lowerCaseName.endsWith('.gif') ||
            lowerCaseName.endsWith('.webp');
+  };
+
+  // Function to perform OCR on the uploaded file
+  const handleOcr = async () => {
+    if (uploadedFile) {
+      try {
+        const { data: { text } } = await Tesseract.recognize(uploadedFile, 'eng');
+        setOcrResult(text);
+      } catch (error) {
+        console.error('Error performing OCR:', error);
+      }
+    }
+  };
+
+  // Function to copy OCR result to clipboard
+  const handleCopyToClipboard = () => {
+    navigator.clipboard.writeText(ocrResult).then(() => {
+      alert('OCR result copied to clipboard');
+    }).catch(err => {
+      console.error('Error copying to clipboard:', err);
+    });
   };
 
   return (
@@ -700,8 +737,17 @@ export function OperationsPage({
           <div className="bg-gray-800 rounded-lg shadow-lg p-6">
             <div className="flex justify-between items-center mb-6">
               <h2 className="text-2xl font-bold text-white">Recibos de Operaciones</h2>
-              <div className="text-lg font-semibold text-[#88BDFD]">
-                Total: RD${receipts.reduce((sum, receipt) => sum + receipt.amount, 0).toFixed(2)}
+              <div className="flex gap-2 items-center">
+                <button
+                  onClick={() => setShowOcrModal(true)}
+                  className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors flex items-center gap-2"
+                >
+                  <FileScan size={20} />
+                  OCR de Recibos
+                </button>
+                <div className="text-lg font-semibold text-[#88BDFD]">
+                  Total: RD${receipts.reduce((sum, receipt) => sum + receipt.amount, 0).toFixed(2)}
+                </div>
               </div>
             </div>
 
@@ -807,6 +853,26 @@ export function OperationsPage({
                     />
                   </label>
                 </div>
+                <button
+                  onClick={handleOcr}
+                  disabled={!uploadedFile}
+                  className={`mt-4 px-4 py-2 rounded-md ${uploadedFile ? 'bg-blue-600 hover:bg-blue-700 text-white' : 'bg-gray-600 text-gray-400 cursor-not-allowed'}`}
+                >
+                  Perform OCR
+                </button>
+                {ocrResult && (
+                  <div className="mt-4">
+                    <h3 className="text-lg font-semibold">OCR Result:</h3>
+                    <p className="bg-gray-700 p-4 rounded-md mt-2">{ocrResult}</p>
+                    <button
+                      onClick={handleCopyToClipboard}
+                      className="mt-2 px-4 py-2 rounded-md bg-green-600 hover:bg-green-700 text-white flex items-center gap-2"
+                    >
+                      <Clipboard size={18} />
+                      Copy to Clipboard
+                    </button>
+                  </div>
+                )}
               </div>
 
               <div className="bg-gray-700 p-4 rounded-lg">
@@ -921,6 +987,12 @@ export function OperationsPage({
             </div>
           </div>
         )}
+        
+        {/* Add OCR Processor Modal */}
+        <OcrProcessor 
+          isOpen={showOcrModal} 
+          onClose={() => setShowOcrModal(false)} 
+        />
       </main>
     </div>
   );

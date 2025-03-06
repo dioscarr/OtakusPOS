@@ -9,14 +9,14 @@
     "preview": "vite preview",
     "setup-rls": "supabase db push"
   },
- 
- 
   "dependencies": {
     "@supabase/supabase-js": "2.39.0",
+    "file-saver": "^2.0.5",
     "lucide-react": "0.344.0",
     "react": "18.2.0",
     "react-dom": "18.2.0",
-    "recharts": "2.12.0"
+    "recharts": "2.12.0",
+    "tesseract.js": "^4.1.1"
   },
   "devDependencies": {
     "@types/react": "18.2.55",
