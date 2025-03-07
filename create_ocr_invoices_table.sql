@@ -7,6 +7,7 @@ CREATE TABLE ocr_invoices (
     nif TEXT,  -- Dio Rod: new field for NIF
     date DATE NOT NULL,
     invoice_number TEXT,
+    ncf TEXT,  -- Dio Rod: new field for NCF
     subtotal NUMERIC(12,2) NOT NULL,
     tax NUMERIC(12,2) NOT NULL,
     total NUMERIC(12,2) NOT NULL,

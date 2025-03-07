@@ -12,6 +12,7 @@ interface ExtractedInvoice {
   supplier: string;
   rcn: string; // Dio Rod
   nif: string; // Dio Rod: new field for NIF
+  ncf: string; // Dio Rod: new field for NCF
   date: string;
   invoiceNumber: string;
   subtotal: number;
@@ -31,6 +32,7 @@ export function OcrProcessor({ onClose, isOpen }: OcrProcessorProps) {
     supplier: '',
     rcn: '', // Dio Rod
     nif: '', // Dio Rod: new field default
+    ncf: '', // Dio Rod: new field default
     date: new Date().toISOString().split('T')[0],
     invoiceNumber: '',
     subtotal: 0,
@@ -53,6 +55,7 @@ export function OcrProcessor({ onClose, isOpen }: OcrProcessorProps) {
         supplier: '',
         rcn: '', // Dio Rod
         nif: '', // Dio Rod: new field default
+        ncf: '', // Dio Rod: new field default
         date: new Date().toISOString().split('T')[0],
         invoiceNumber: '',
         subtotal: 0,
@@ -179,6 +182,7 @@ export function OcrProcessor({ onClose, isOpen }: OcrProcessorProps) {
       supplier: '',
       rcn: '', // Dio Rod
       nif: '', // Dio Rod: new field initialization
+      ncf: '', // Dio Rod: new field initialization
       date: new Date().toISOString().split('T')[0],
       invoiceNumber: '',
       subtotal: 0,
@@ -259,6 +263,18 @@ export function OcrProcessor({ onClose, isOpen }: OcrProcessorProps) {
       const match = text.match(pattern);
       if (match && match[1]) {
         invoice.nif = match[1].trim();
+        break;
+      }
+    }
+
+    // New: Extract NCF field
+    const ncfPatterns = [
+      /ncf[:\s]+([\w\d-]+)/i
+    ];
+    for (const pattern of ncfPatterns) {
+      const match = text.match(pattern);
+      if (match && match[1]) {
+        invoice.ncf = match[1].trim();
         break;
       }
     }
@@ -344,7 +360,7 @@ export function OcrProcessor({ onClose, isOpen }: OcrProcessorProps) {
         return;
       }
       
-      // Insert invoice data into the database (Updated to use "ocr_invoices" table) // Dio Rod
+      // Insert invoice data into the database (Updated to include "ncf") // Dio Rod
       const { data, error, status } = await supabase
         .from('ocr_invoices')  // Changed from "invoices" to "ocr_invoices"
         .insert([
@@ -352,6 +368,7 @@ export function OcrProcessor({ onClose, isOpen }: OcrProcessorProps) {
             supplier: extractedInvoice.supplier,
             rcn: extractedInvoice.rcn, // Dio Rod: new field insertion
             nif: extractedInvoice.nif, // Dio Rod: new field insertion
+            ncf: extractedInvoice.ncf, // Dio Rod: new field insertion
             date: extractedInvoice.date,
             invoice_number: extractedInvoice.invoiceNumber,
             subtotal: extractedInvoice.subtotal,
@@ -388,7 +405,7 @@ export function OcrProcessor({ onClose, isOpen }: OcrProcessorProps) {
       <div ref={containerRef} className="bg-gray-800 p-6 rounded-lg w-full max-w-4xl mx-4 max-h-[90vh] overflow-y-auto">
         <div className="flex justify-between items-center mb-6">
           <h2 className="text-xl font-bold text-white flex items-center gap-2">
-            <FileScan size={24} className="text-blue-400" />
+            <FileScan size={24} className="text-[#D80000]" /> {/* Dio Rod */}
             {showInvoiceForm ? "Creación de Factura Digital" : "Procesamiento OCR de Recibos"}
           </h2>
           <button
@@ -604,6 +621,21 @@ export function OcrProcessor({ onClose, isOpen }: OcrProcessorProps) {
                     className="w-full px-3 py-2 bg-gray-600 border border-gray-500 rounded-md text-white"
                   />
                 </div>
+                {/* New: NCF input field */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-300 mb-1">
+                    <div className="flex items-center gap-2">
+                      <FileText size={18} className="text-blue-400" />
+                      NCF
+                    </div>
+                  </label>
+                  <input
+                    type="text"
+                    value={extractedInvoice.ncf}
+                    onChange={(e) => setExtractedInvoice({...extractedInvoice, ncf: e.target.value})}
+                    className="w-full px-3 py-2 bg-gray-600 border border-gray-500 rounded-md text-white"
+                  />
+                </div>
                 {/* New: Payment Type input field */}
                 <div>
                   <label className="block text-sm font-medium text-gray-300 mb-1">
@@ -726,6 +758,10 @@ export function OcrProcessor({ onClose, isOpen }: OcrProcessorProps) {
                     <div className="flex justify-between">
                       <span className="font-semibold">NIF:</span>
                       <span>{extractedInvoice.nif || "N/A"}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="font-semibold">NCF:</span>
+                      <span>{extractedInvoice.ncf || "N/A"}</span>
                     </div>
                     <div className="flex justify-between">
                       <span className="font-semibold">Forma de Pago:</span>
