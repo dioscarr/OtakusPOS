@@ -17,6 +17,7 @@ interface ExtractedInvoice {
   subtotal: number;
   tax: number;
   total: number;
+  paymentType: string; // Dio Rod: new field for Payment Type
 }
 
 export function OcrProcessor({ onClose, isOpen }: OcrProcessorProps) {
@@ -34,7 +35,8 @@ export function OcrProcessor({ onClose, isOpen }: OcrProcessorProps) {
     invoiceNumber: '',
     subtotal: 0,
     tax: 0,
-    total: 0
+    total: 0,
+    paymentType: '' // Dio Rod: new field default
   });
   const [invoiceGenerated, setInvoiceGenerated] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -55,7 +57,8 @@ export function OcrProcessor({ onClose, isOpen }: OcrProcessorProps) {
         invoiceNumber: '',
         subtotal: 0,
         tax: 0,
-        total: 0
+        total: 0,
+        paymentType: '' // Dio Rod: new field default
       });
       setInvoiceGenerated(false);
     }
@@ -180,7 +183,8 @@ export function OcrProcessor({ onClose, isOpen }: OcrProcessorProps) {
       invoiceNumber: '',
       subtotal: 0,
       tax: 0,
-      total: 0
+      total: 0,
+      paymentType: '' // Dio Rod: new field initialization
     };
 
     // Try to extract supplier name (usually one of the first lines)
@@ -215,12 +219,12 @@ export function OcrProcessor({ onClose, isOpen }: OcrProcessorProps) {
       }
     }
 
-    // Try to extract invoice number
+    // Updated: Try to extract invoice number with additional patterns for synonyms
     const invoicePatterns = [
       /invoice[:\s]+(.*)/i,
       /invoice\s+no[:\s]+(.*)/i,
-      /factura[:\s]+(.*)/i,
-      /factura\s+no[:\s]+(.*)/i,
+      /factura(?:\s+no)?[:\s]+(.*)/i, // Dio Rod: covers "factura" or "factura no"
+      /numero\s+de\s+factura[:\s]+(.*)/i,
       /no\.?\s+(\d+[-\w]*)/i,
       /number[:\s]+(\d+[-\w]*)/i,
       /número[:\s]+(\d+[-\w]*)/i
@@ -259,10 +263,27 @@ export function OcrProcessor({ onClose, isOpen }: OcrProcessorProps) {
       }
     }
 
+    // New: Improved Payment Type extraction using multiple keyword checks
+    const paymentTypePattern = /forma de pago[:\s]+([\w\d\s]+)/i;
+    const paymentMatch = text.match(paymentTypePattern);
+    if (paymentMatch && paymentMatch[1]) {
+      const rawPayment = paymentMatch[1].trim().toLowerCase();
+      if (rawPayment.includes('visa')) {
+        invoice.paymentType = 'Visa'; // Dio Rod
+      } else if (rawPayment.includes('mastercard') || rawPayment.includes('credito')) {
+        invoice.paymentType = 'Mastercard/Credito'; // Dio Rod
+      } else if (rawPayment.includes('efectivo')) {
+        invoice.paymentType = 'Efectivo'; // Dio Rod
+      } else {
+        invoice.paymentType = paymentMatch[1].trim();
+      }
+    }
+
     // Try to extract amounts
     // Integrate additional keywords for the total amount extraction from Dominican invoices.
     const totalPattern = /(?:total a pagar|total factura|monto total|total general|importe total|valor total|total)[:\s]+([\d,\.]+)/i;
-    const subtotalPattern = /subtotal[:\s]+([\d,\.]+)/i;
+    // Updated: Use a more flexible pattern for subtotal extraction (sub-total allowed)
+    const subtotalPattern = /sub[-\s]?total[:\s]+([\d,\.]+)/i;
     const taxPatterns = [
       /tax[:\s]+([\d,\.]+)/i,
       /iva[:\s]+([\d,\.]+)/i,
@@ -323,9 +344,9 @@ export function OcrProcessor({ onClose, isOpen }: OcrProcessorProps) {
         return;
       }
       
-      // Insert invoice data into the database
+      // Insert invoice data into the database (Updated to use "ocr_invoices" table) // Dio Rod
       const { data, error, status } = await supabase
-        .from('invoices')
+        .from('ocr_invoices')  // Changed from "invoices" to "ocr_invoices"
         .insert([
           {
             supplier: extractedInvoice.supplier,
@@ -336,6 +357,7 @@ export function OcrProcessor({ onClose, isOpen }: OcrProcessorProps) {
             subtotal: extractedInvoice.subtotal,
             tax: extractedInvoice.tax,
             total: extractedInvoice.total,
+            payment_type: extractedInvoice.paymentType, // Dio Rod: new field insertion
             receipt_image_url: imagePreview, // Store the image reference
           },
         ])
@@ -344,7 +366,7 @@ export function OcrProcessor({ onClose, isOpen }: OcrProcessorProps) {
       if (error) {
         console.error('Error inserting invoice:', error);
         if (status === 404) {
-          alert('Error: La tabla "invoices" no se encuentra. Por favor, asegúrese de que la tabla exista en su base de datos Supabase.');
+          alert('Error: La tabla "ocr_invoices" no se encuentra. Por favor, asegúrese de que la tabla exista en su base de datos Supabase.');
         } else {
           alert(`Error al guardar la factura: ${error.message}`);
         }
@@ -582,6 +604,21 @@ export function OcrProcessor({ onClose, isOpen }: OcrProcessorProps) {
                     className="w-full px-3 py-2 bg-gray-600 border border-gray-500 rounded-md text-white"
                   />
                 </div>
+                {/* New: Payment Type input field */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-300 mb-1">
+                    <div className="flex items-center gap-2">
+                      <FileText size={18} className="text-blue-400" />
+                      Forma de Pago
+                    </div>
+                  </label>
+                  <input
+                    type="text"
+                    value={extractedInvoice.paymentType}
+                    onChange={(e) => setExtractedInvoice({...extractedInvoice, paymentType: e.target.value})}
+                    className="w-full px-3 py-2 bg-gray-600 border border-gray-500 rounded-md text-white"
+                  />
+                </div>
               </div>
               
               <div className="space-y-4">
@@ -689,6 +726,10 @@ export function OcrProcessor({ onClose, isOpen }: OcrProcessorProps) {
                     <div className="flex justify-between">
                       <span className="font-semibold">NIF:</span>
                       <span>{extractedInvoice.nif || "N/A"}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="font-semibold">Forma de Pago:</span>
+                      <span>{extractedInvoice.paymentType || "N/A"}</span>
                     </div>
                     
                     <div className="border-t border-gray-200 my-2 pt-2">
