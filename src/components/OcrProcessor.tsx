@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from 'react';
-import { X, Upload, Clipboard, FileScan, Save, DollarSign, Calendar, User, FileText } from 'lucide-react';
+import React, { useState, useEffect, useRef } from 'react';
+import { X, Upload, Clipboard, FileScan, Save, DollarSign, Calendar, User, FileText, Image } from 'lucide-react';
 import Tesseract from 'tesseract.js';
 import { supabase } from '../lib/supabase'; // Import Supabase client
 
@@ -10,6 +10,8 @@ interface OcrProcessorProps {
 
 interface ExtractedInvoice {
   supplier: string;
+  rcn: string; // Dio Rod
+  nif: string; // Dio Rod: new field for NIF
   date: string;
   invoiceNumber: string;
   subtotal: number;
@@ -26,6 +28,8 @@ export function OcrProcessor({ onClose, isOpen }: OcrProcessorProps) {
   const [showInvoiceForm, setShowInvoiceForm] = useState(false);
   const [extractedInvoice, setExtractedInvoice] = useState<ExtractedInvoice>({
     supplier: '',
+    rcn: '', // Dio Rod
+    nif: '', // Dio Rod: new field default
     date: new Date().toISOString().split('T')[0],
     invoiceNumber: '',
     subtotal: 0,
@@ -33,6 +37,7 @@ export function OcrProcessor({ onClose, isOpen }: OcrProcessorProps) {
     total: 0
   });
   const [invoiceGenerated, setInvoiceGenerated] = useState(false);
+  const containerRef = useRef<HTMLDivElement>(null);
 
   // Reset states when modal is opened
   useEffect(() => {
@@ -44,6 +49,8 @@ export function OcrProcessor({ onClose, isOpen }: OcrProcessorProps) {
       setShowInvoiceForm(false);
       setExtractedInvoice({
         supplier: '',
+        rcn: '', // Dio Rod
+        nif: '', // Dio Rod: new field default
         date: new Date().toISOString().split('T')[0],
         invoiceNumber: '',
         subtotal: 0,
@@ -53,6 +60,47 @@ export function OcrProcessor({ onClose, isOpen }: OcrProcessorProps) {
       setInvoiceGenerated(false);
     }
   }, [isOpen]);
+
+  // Add clipboard paste event listener
+  useEffect(() => {
+    const handlePaste = (e: ClipboardEvent) => {
+      if (!isOpen || showInvoiceForm) return;
+      
+      const items = e.clipboardData?.items;
+      if (!items) return;
+      
+      for (let i = 0; i < items.length; i++) {
+        if (items[i].type.indexOf('image') !== -1) {
+          const blob = items[i].getAsFile();
+          if (blob) {
+            handlePastedImage(blob);
+            break;
+          }
+        }
+      }
+    };
+
+    document.addEventListener('paste', handlePaste);
+    return () => {
+      document.removeEventListener('paste', handlePaste);
+    };
+  }, [isOpen, showInvoiceForm]);
+
+  const handlePastedImage = (blob: File) => {
+    // Set the uploaded file
+    setUploadedFile(blob);
+    setOcrResult('');
+    setOcrProgress(0);
+    setShowInvoiceForm(false);
+    setInvoiceGenerated(false);
+
+    // Create a preview for the image
+    const reader = new FileReader();
+    reader.onloadend = () => {
+      setImagePreview(reader.result as string);
+    };
+    reader.readAsDataURL(blob);
+  };
 
   if (!isOpen) return null;
 
@@ -74,6 +122,17 @@ export function OcrProcessor({ onClose, isOpen }: OcrProcessorProps) {
     reader.readAsDataURL(file);
   };
 
+  // Add sanitizeText helper function
+  function sanitizeText(input: string): string {
+    // Replace curly quotes with straight ones, convert dashes, collapse whitespace, and trim
+    return input.replace(/[‘’]/g, "'")
+                .replace(/[“”]/g, '"')
+                .replace(/[\u2013\u2014]/g, '-') // Replace en-dash and em-dash with hyphen
+                .replace(/\s+/g, ' ')
+                .trim();
+  }
+
+  // Modify handleOcr to sanitize OCR text
   const handleOcr = async () => {
     if (!uploadedFile) return;
 
@@ -94,10 +153,12 @@ export function OcrProcessor({ onClose, isOpen }: OcrProcessorProps) {
       );
 
       const extractedText = result.data.text;
-      setOcrResult(extractedText);
+      // Sanitize the extracted OCR text
+      const sanitizedText = sanitizeText(extractedText);
+      setOcrResult(sanitizedText);
       
-      // Extract invoice data from OCR text
-      const extractedData = extractInvoiceData(extractedText);
+      // Extract invoice data from sanitized text
+      const extractedData = extractInvoiceData(sanitizedText);
       setExtractedInvoice(extractedData);
       setShowInvoiceForm(true);
     } catch (error) {
@@ -113,6 +174,8 @@ export function OcrProcessor({ onClose, isOpen }: OcrProcessorProps) {
   const extractInvoiceData = (text: string): ExtractedInvoice => {
     const invoice: ExtractedInvoice = {
       supplier: '',
+      rcn: '', // Dio Rod
+      nif: '', // Dio Rod: new field initialization
       date: new Date().toISOString().split('T')[0],
       invoiceNumber: '',
       subtotal: 0,
@@ -171,8 +234,34 @@ export function OcrProcessor({ onClose, isOpen }: OcrProcessorProps) {
       }
     }
 
+    // New: Try to extract RCN using additional keyword patterns
+    const rcnPatterns = [
+      /rcn[:\s]+([\w\d-]+)/i,
+      /rnc[:\s]+([\w\d-]+)/i  // In case it's written as RNC
+    ];
+    for (const pattern of rcnPatterns) {
+      const match = text.match(pattern);
+      if (match && match[1]) {
+        invoice.rcn = match[1].trim();
+        break;
+      }
+    }
+
+    // New: Extract NIF field
+    const nifPatterns = [
+      /nif[:\s]+([\w\d-]+)/i
+    ];
+    for (const pattern of nifPatterns) {
+      const match = text.match(pattern);
+      if (match && match[1]) {
+        invoice.nif = match[1].trim();
+        break;
+      }
+    }
+
     // Try to extract amounts
-    const totalPattern = /total[:\s]+([\d,\.]+)/i;
+    // Integrate additional keywords for the total amount extraction from Dominican invoices.
+    const totalPattern = /(?:total a pagar|total factura|monto total|total general|importe total|valor total|total)[:\s]+([\d,\.]+)/i;
     const subtotalPattern = /subtotal[:\s]+([\d,\.]+)/i;
     const taxPatterns = [
       /tax[:\s]+([\d,\.]+)/i,
@@ -240,6 +329,8 @@ export function OcrProcessor({ onClose, isOpen }: OcrProcessorProps) {
         .insert([
           {
             supplier: extractedInvoice.supplier,
+            rcn: extractedInvoice.rcn, // Dio Rod: new field insertion
+            nif: extractedInvoice.nif, // Dio Rod: new field insertion
             date: extractedInvoice.date,
             invoice_number: extractedInvoice.invoiceNumber,
             subtotal: extractedInvoice.subtotal,
@@ -272,7 +363,7 @@ export function OcrProcessor({ onClose, isOpen }: OcrProcessorProps) {
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
-      <div className="bg-gray-800 p-6 rounded-lg w-full max-w-4xl mx-4 max-h-[90vh] overflow-y-auto">
+      <div ref={containerRef} className="bg-gray-800 p-6 rounded-lg w-full max-w-4xl mx-4 max-h-[90vh] overflow-y-auto">
         <div className="flex justify-between items-center mb-6">
           <h2 className="text-xl font-bold text-white flex items-center gap-2">
             <FileScan size={24} className="text-blue-400" />
@@ -291,16 +382,32 @@ export function OcrProcessor({ onClose, isOpen }: OcrProcessorProps) {
             <div className="space-y-4">
               <div className="bg-gray-700 p-4 rounded-lg">
                 <h3 className="text-white font-medium mb-4">Subir Imagen</h3>
-                <label className="flex items-center justify-center gap-2 px-4 py-6 border-2 border-dashed border-gray-500 rounded-md hover:border-blue-400 transition-colors cursor-pointer">
-                  <Upload size={24} className="text-blue-400" />
-                  <span className="text-gray-300">Seleccionar imagen de recibo</span>
-                  <input
-                    type="file"
-                    onChange={handleFileUpload}
-                    accept="image/*"
-                    className="hidden"
-                  />
-                </label>
+                <div className="flex flex-col gap-4">
+                  <label className="flex items-center justify-center gap-2 px-4 py-6 border-2 border-dashed border-gray-500 rounded-md hover:border-blue-400 transition-colors cursor-pointer">
+                    <Upload size={24} className="text-blue-400" />
+                    <span className="text-gray-300">Seleccionar imagen de recibo</span>
+                    <input
+                      type="file"
+                      onChange={handleFileUpload}
+                      accept="image/*"
+                      className="hidden"
+                    />
+                  </label>
+
+                  <div className="relative flex items-center">
+                    <div className="flex-grow border-t border-gray-600"></div>
+                    <span className="flex-shrink mx-4 text-gray-400">o</span>
+                    <div className="flex-grow border-t border-gray-600"></div>
+                  </div>
+                  
+                  <button 
+                    className="flex items-center justify-center gap-2 px-4 py-4 border-2 border-dashed border-gray-500 rounded-md hover:border-blue-400 transition-colors cursor-pointer"
+                    onClick={() => containerRef.current?.focus()}
+                  >
+                    <Image size={24} className="text-blue-400" />
+                    <span className="text-gray-300">Pegar imagen del portapapeles (Ctrl+V)</span>
+                  </button>
+                </div>
 
                 {imagePreview && (
                   <div className="mt-4">
@@ -310,9 +417,14 @@ export function OcrProcessor({ onClose, isOpen }: OcrProcessorProps) {
                       className="w-full max-h-52 object-contain rounded-md"
                     />
                     <p className="text-xs text-gray-400 mt-1">
-                      {uploadedFile?.name} ({(uploadedFile?.size || 0) / 1024 < 1000 
-                        ? `${Math.round((uploadedFile?.size || 0) / 1024)} KB` 
-                        : `${Math.round((uploadedFile?.size || 0) / 1024 / 1024 * 10) / 10} MB`})
+                      {uploadedFile?.name || "Imagen pegada"} 
+                      {uploadedFile?.size && (
+                        <span>
+                          ({(uploadedFile.size) / 1024 < 1000 
+                            ? `${Math.round((uploadedFile.size) / 1024)} KB` 
+                            : `${Math.round((uploadedFile.size) / 1024 / 1024 * 10) / 10} MB`})
+                        </span>
+                      )}
                     </p>
                   </div>
                 )}
@@ -440,6 +552,36 @@ export function OcrProcessor({ onClose, isOpen }: OcrProcessorProps) {
                     className="w-full px-3 py-2 bg-gray-600 border border-gray-500 rounded-md text-white"
                   />
                 </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-300 mb-1">
+                    <div className="flex items-center gap-2">
+                      <FileText size={18} className="text-blue-400" />
+                      RCN
+                    </div>
+                  </label>
+                  <input
+                    type="text"
+                    value={extractedInvoice.rcn}
+                    onChange={(e) => setExtractedInvoice({...extractedInvoice, rcn: e.target.value})}
+                    className="w-full px-3 py-2 bg-gray-600 border border-gray-500 rounded-md text-white"
+                  />
+                </div>
+                {/* New: NIF input field */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-300 mb-1">
+                    <div className="flex items-center gap-2">
+                      <FileText size={18} className="text-blue-400" />
+                      NIF
+                    </div>
+                  </label>
+                  <input
+                    type="text"
+                    value={extractedInvoice.nif}
+                    onChange={(e) => setExtractedInvoice({...extractedInvoice, nif: e.target.value})}
+                    className="w-full px-3 py-2 bg-gray-600 border border-gray-500 rounded-md text-white"
+                  />
+                </div>
               </div>
               
               <div className="space-y-4">
@@ -540,6 +682,14 @@ export function OcrProcessor({ onClose, isOpen }: OcrProcessorProps) {
                       <span className="font-semibold">No. Factura:</span>
                       <span>{extractedInvoice.invoiceNumber || "N/A"}</span>
                     </div>
+                    <div className="flex justify-between">
+                      <span className="font-semibold">RCN:</span>
+                      <span>{extractedInvoice.rcn || "N/A"}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="font-semibold">NIF:</span>
+                      <span>{extractedInvoice.nif || "N/A"}</span>
+                    </div>
                     
                     <div className="border-t border-gray-200 my-2 pt-2">
                       <div className="flex justify-between">
@@ -598,6 +748,7 @@ export function OcrProcessor({ onClose, isOpen }: OcrProcessorProps) {
               <li>Asegúrese de que el texto sea claramente visible</li>
               <li>Evite imágenes borrosas o con sombras</li>
               <li>Capture la imagen en un ángulo recto</li>
+              <li>Puede pegar directamente imágenes desde el portapapeles usando Ctrl+V</li>
             </ul>
           </div>
         )}
