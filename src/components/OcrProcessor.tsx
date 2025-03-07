@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { X, Upload, Clipboard, FileScan, Save, DollarSign, Calendar, User, FileText } from 'lucide-react';
 import Tesseract from 'tesseract.js';
+import { supabase } from '../lib/supabase'; // Import Supabase client
 
 interface OcrProcessorProps {
   onClose: () => void;
@@ -225,22 +226,48 @@ export function OcrProcessor({ onClose, isOpen }: OcrProcessorProps) {
     });
   };
 
-  const handleInvoiceSubmit = () => {
-    // Here we would normally save the invoice to the database
-    // For now, we'll just simulate a successful save
-    console.log('Generated digital invoice:', extractedInvoice);
-    setInvoiceGenerated(true);
-    
-    // In a real implementation, we would use supabase to insert the invoice
-    // const { error } = await supabase.from('invoices').insert({
-    //   supplier: extractedInvoice.supplier,
-    //   date: extractedInvoice.date,
-    //   invoice_number: extractedInvoice.invoiceNumber,
-    //   subtotal: extractedInvoice.subtotal,
-    //   tax: extractedInvoice.tax,
-    //   total: extractedInvoice.total,
-    //   receipt_image_url: imagePreview // Store the image reference
-    // });
+  const handleInvoiceSubmit = async () => {
+    try {
+      // Validate data before submitting
+      if (!extractedInvoice.supplier || !extractedInvoice.date || !extractedInvoice.total) {
+        alert('Por favor, complete todos los campos requeridos.');
+        return;
+      }
+      
+      // Insert invoice data into the database
+      const { data, error, status } = await supabase
+        .from('invoices')
+        .insert([
+          {
+            supplier: extractedInvoice.supplier,
+            date: extractedInvoice.date,
+            invoice_number: extractedInvoice.invoiceNumber,
+            subtotal: extractedInvoice.subtotal,
+            tax: extractedInvoice.tax,
+            total: extractedInvoice.total,
+            receipt_image_url: imagePreview, // Store the image reference
+          },
+        ])
+        .select();
+      
+      if (error) {
+        console.error('Error inserting invoice:', error);
+        if (status === 404) {
+          alert('Error: La tabla "invoices" no se encuentra. Por favor, asegúrese de que la tabla exista en su base de datos Supabase.');
+        } else {
+          alert(`Error al guardar la factura: ${error.message}`);
+        }
+        return;
+      }
+      
+      console.log('Invoice inserted successfully:', data);
+      setInvoiceGenerated(true);
+      alert('Factura guardada exitosamente en la base de datos.');
+      
+    } catch (err) {
+      console.error('Error saving invoice:', err);
+      alert(`Error al guardar la factura: ${err instanceof Error ? err.message : 'Por favor intente de nuevo'}`);
+    }
   };
 
   return (
