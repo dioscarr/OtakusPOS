@@ -6,6 +6,7 @@ import { clearAllOrders } from '../lib/orders';
 import Tesseract from 'tesseract.js'; // Add Tesseract.js for OCR
 import { saveAs } from 'file-saver'; // Add file-saver for saving files
 import { OcrProcessor } from './OcrProcessor';
+import { OcrInvoicesManager } from './OcrInvoicesManager'; // Dio Rod
 
 interface OperationsPageProps {
   menuItems: MenuItem[];
@@ -51,6 +52,7 @@ export function OperationsPage({
   const [uploadedFile, setUploadedFile] = useState<File | null>(null);
   const [ocrResult, setOcrResult] = useState<string>('');
   const [showOcrModal, setShowOcrModal] = useState(false);
+  const [showOcrInvoicesManager, setShowOcrInvoicesManager] = useState(false);
 
   // Get unique categories from menu items
   const categories = React.useMemo(() => {
@@ -745,6 +747,14 @@ export function OperationsPage({
                   <FileScan size={20} />
                   OCR de Recibos
                 </button>
+                {/* New Button to Open OCR Invoices Manager */}
+                <button
+                  onClick={() => setShowOcrInvoicesManager(true)}
+                  className="px-4 py-2 bg-[#D80000] text-white rounded-md hover:bg-[#ff1a1a] transition-colors flex items-center gap-2"
+                >
+                  <FileScan size={20} className="mr-1" />
+                  OCR Invoices Manager
+                </button>
                 <div className="text-lg font-semibold text-[#88BDFD]">
                   Total: RD${receipts.reduce((sum, receipt) => sum + receipt.amount, 0).toFixed(2)}
                 </div>
@@ -993,6 +1003,12 @@ export function OperationsPage({
           isOpen={showOcrModal} 
           onClose={() => setShowOcrModal(false)} 
         />
+        {showOcrInvoicesManager && (
+          <OcrInvoicesManager 
+            isOpen={true} 
+            onClose={() => setShowOcrInvoicesManager(false)} 
+          />
+        )}
       </main>
     </div>
   );

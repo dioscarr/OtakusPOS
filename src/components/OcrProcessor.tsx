@@ -42,6 +42,7 @@ export function OcrProcessor({ onClose, isOpen }: OcrProcessorProps) {
   });
   const [invoiceGenerated, setInvoiceGenerated] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
+  const [zoom, setZoom] = useState(false); // Dio Rod
 
   // Reset states when modal is opened
   useEffect(() => {
@@ -402,7 +403,10 @@ export function OcrProcessor({ onClose, isOpen }: OcrProcessorProps) {
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
-      <div ref={containerRef} className="bg-gray-800 p-6 rounded-lg w-full max-w-4xl mx-4 max-h-[90vh] overflow-y-auto">
+      <div 
+        ref={containerRef} 
+        className="bg-gray-800 p-6 rounded-lg w-full max-w-6xl mx-4 max-h-[90vh] overflow-auto relative"
+      >
         <div className="flex justify-between items-center mb-6">
           <h2 className="text-xl font-bold text-white flex items-center gap-2">
             <FileScan size={24} className="text-[#D80000]" /> {/* Dio Rod */}
@@ -786,10 +790,14 @@ export function OcrProcessor({ onClose, isOpen }: OcrProcessorProps) {
                 </div>
               </div>
               
+              {/* Updated image container for zooming (Dio Rod) */}
               {imagePreview && (
                 <div className="bg-gray-800 p-4 rounded-lg">
                   <h3 className="text-white font-medium mb-2">Imagen Original</h3>
-                  <div className="w-full h-48 bg-gray-700 rounded-md overflow-hidden">
+                  <div 
+                    className={`w-full ${zoom ? 'max-h-[80vh]' : 'h-48'} bg-gray-700 rounded-md overflow-hidden cursor-pointer relative z-10`}
+                    onClick={() => setZoom(prev => !prev)}
+                  >
                     <img
                       src={imagePreview}
                       alt="Receipt"
