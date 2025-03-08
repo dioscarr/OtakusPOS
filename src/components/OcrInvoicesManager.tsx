@@ -262,7 +262,7 @@ export function OcrInvoicesManager({ onClose, isOpen }: OcrInvoicesManagerProps)
         {/* Edit Modal for manual corrections */}
         {editingInvoice && (
           <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-60">
-            <div className="bg-gray-800 p-6 rounded-lg w-full max-w-4xl mx-4 overflow-y-auto">
+            <div className="bg-gray-800 p-6 rounded-lg w-full max-w-4xl mx-4 max-h-[90vh] overflow-y-auto">
               <div className="flex justify-between items-center mb-4">
                 <h3 className="text-xl font-bold text-white">Editar Factura OCR</h3>
                 <button onClick={() => setEditingInvoice(null)} className="text-gray-400 hover:text-gray-300">
@@ -304,7 +304,7 @@ export function OcrInvoicesManager({ onClose, isOpen }: OcrInvoicesManagerProps)
         {/* Detail / Import Confirmation Modal */}
         {selectedInvoice && (
           <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-60">
-            <div className="bg-gray-800 p-6 rounded-lg w-full max-w-3xl mx-4 overflow-y-auto">
+            <div className="bg-gray-800 p-6 rounded-lg w-full max-w-3xl mx-4 max-h-[90vh] overflow-y-auto">
               <div className="flex justify-between items-center mb-4">
                 <h3 className="text-xl font-bold text-white">Detalle e Importación</h3>
                 <button onClick={() => setSelectedInvoice(null)} className="text-gray-400 hover:text-gray-300">
@@ -347,7 +347,7 @@ export function OcrInvoicesManager({ onClose, isOpen }: OcrInvoicesManagerProps)
         {/* Import Confirmation Modal */}
         {showImportConfirm && (
           <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-70">
-            <div className="bg-gray-800 p-6 rounded-lg w-full max-w-md mx-4">
+            <div className="bg-gray-800 p-6 rounded-lg w-full max-w-md mx-4 max-h-[90vh] overflow-y-auto">
               <h3 className="text-xl font-bold text-white mb-4">Confirmar Importación</h3>
               <p className="text-gray-300 mb-4">
                 Revise los datos de la factura OCR y confirme que desea importarla

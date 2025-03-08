@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { X, Upload, Clipboard, FileScan, Save, DollarSign, Calendar, User, FileText, Image } from 'lucide-react';
 import Tesseract from 'tesseract.js';
 import { supabase } from '../lib/supabase'; // Import Supabase client
+import Anthropic from "@anthropic-ai/sdk"; // Dio Rod
 
 interface OcrProcessorProps {
   onClose: () => void;
@@ -20,6 +21,12 @@ interface ExtractedInvoice {
   total: number;
   paymentType: string; // Dio Rod: new field for Payment Type
 }
+
+// Replace process.env with import.meta.env for browser compatibility
+const anthropic = new Anthropic({
+  apiKey: import.meta.env.VITE_ANTHROPIC_API_KEY || "my_api_key", // Dio Rod
+  dangerouslyAllowBrowser: true // Dio Rod
+});
 
 export function OcrProcessor({ onClose, isOpen }: OcrProcessorProps) {
   const [isProcessing, setIsProcessing] = useState(false);
@@ -43,6 +50,8 @@ export function OcrProcessor({ onClose, isOpen }: OcrProcessorProps) {
   const [invoiceGenerated, setInvoiceGenerated] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
   const [zoom, setZoom] = useState(false); // Dio Rod
+  const [showDebugData, setShowDebugData] = useState(false); // Dio Rod
+  const [processingMode, setProcessingMode] = useState<'enhanced' | 'basic'>('enhanced'); // Dio Rod
 
   // Reset states when modal is opened
   useEffect(() => {
@@ -139,7 +148,126 @@ export function OcrProcessor({ onClose, isOpen }: OcrProcessorProps) {
                 .trim();
   }
 
-  // Modify handleOcr to sanitize OCR text
+  // Function to call Anthropic API for processing OCR data
+  const processOcrWithAnthropic = async (text: string): Promise<string> => {
+    try {
+      const msg = await anthropic.messages.create({
+        model: "claude-3-7-sonnet-20250219",
+        max_tokens: 20000,
+        temperature: 1,
+        messages: [{ role: "user", content: text }],
+      });
+      console.log(msg);
+      return msg.choices[0].message.content;
+    } catch (error) {
+      console.error("Error processing OCR with Anthropic:", error);
+      return text; // Return original text if there's an error
+    }
+  };
+
+  // Updated extraction mapping from AI results - Dio Rod
+  const extractInvoiceDataFromApiResult = (apiResult: string): ExtractedInvoice => {
+    const invoice: ExtractedInvoice = {
+      supplier: '',
+      rcn: '', // Dio Rod
+      nif: '', // Dio Rod: new field initialization
+      ncf: '', // Dio Rod: new field initialization
+      date: new Date().toISOString().split('T')[0],
+      invoiceNumber: '',
+      subtotal: 0,
+      tax: 0,
+      total: 0,
+      paymentType: '' // Dio Rod: new field initialization
+    };
+  
+    // Direct extractions
+    const supplierMatch = apiResult.match(/Supplier:\s*(.*)/i);
+    if (supplierMatch && supplierMatch[1]) {
+      invoice.supplier = supplierMatch[1].trim();
+    }
+    const dateMatch = apiResult.match(/Date:\s*(.*)/i);
+    if (dateMatch && dateMatch[1]) {
+      invoice.date = new Date(dateMatch[1].trim()).toISOString().split('T')[0];
+    }
+    const invoiceNumberMatch = apiResult.match(/Invoice Number:\s*(.*)/i);
+    if (invoiceNumberMatch && invoiceNumberMatch[1]) {
+      invoice.invoiceNumber = invoiceNumberMatch[1].trim();
+    }
+    const subtotalMatch = apiResult.match(/Subtotal:\s*([\d,\.]+)/i);
+    if (subtotalMatch && subtotalMatch[1]) {
+      invoice.subtotal = parseFloat(subtotalMatch[1].replace(/,/g, ''));
+    }
+    const taxMatch = apiResult.match(/Tax:\s*([\d,\.]+)/i);
+    if (taxMatch && taxMatch[1]) {
+      invoice.tax = parseFloat(taxMatch[1].replace(/,/g, ''));
+    }
+    const totalMatch = apiResult.match(/Total:\s*([\d,\.]+)/i);
+    if (totalMatch && totalMatch[1]) {
+      invoice.total = parseFloat(totalMatch[1].replace(/,/g, ''));
+    }
+    const paymentTypeMatch = apiResult.match(/Payment Type:\s*(.*)/i);
+    if (paymentTypeMatch && paymentTypeMatch[1]) {
+      invoice.paymentType = paymentTypeMatch[1].trim();
+    }
+    const rcnMatch = apiResult.match(/RCN:\s*(.*)/i);
+    if (rcnMatch && rcnMatch[1]) {
+      invoice.rcn = rcnMatch[1].trim();
+    }
+    const nifMatch = apiResult.match(/NIF:\s*(.*)/i);
+    if (nifMatch && nifMatch[1]) {
+      invoice.nif = nifMatch[1].trim();
+    }
+    const ncfMatch = apiResult.match(/NCF:\s*(.*)/i);
+    if (ncfMatch && ncfMatch[1]) {
+      invoice.ncf = ncfMatch[1].trim();
+    }
+    
+    // New extraction: Date from "FECHA" in DDMMYYYY format
+    const fechaMatch = apiResult.match(/FECHA\s+(\d{8})/i);
+    if (fechaMatch && fechaMatch[1]) {
+      const d = fechaMatch[1];
+      const day = d.substring(0,2);
+      const month = d.substring(2,4);
+      const year = d.substring(4,8);
+      invoice.date = new Date(`${year}-${month}-${day}`).toISOString().split('T')[0];
+    }
+  
+    // New extraction: Invoice number from "FACTURA P-..."
+    const facturaMatch = apiResult.match(/FACTURA\s+(P-\d+)/i);
+    if (facturaMatch && facturaMatch[1]) {
+      invoice.invoiceNumber = facturaMatch[1].trim();
+    }
+  
+    // Fallback: check for a "Vendor Info:" line if vendor fields are missing
+    const vendorInfoMatch = apiResult.match(/Vendor Info:\s*(.*)/i);
+    if (vendorInfoMatch && vendorInfoMatch[1]) {
+      const parts = vendorInfoMatch[1].split(',').map(part => part.trim());
+      if (!invoice.supplier && parts[0]) {
+        invoice.supplier = parts[0];
+      }
+      if (!invoice.rcn && parts[1]) {
+        invoice.rcn = parts[1];
+      }
+      if (!invoice.nif && parts[2]) {
+        invoice.nif = parts[2];
+      }
+      if (!invoice.ncf && parts[3]) {
+        invoice.ncf = parts[3];
+      }
+    }
+  
+    // Fallback for supplier: use first non-empty line if still empty
+    if (!invoice.supplier) {
+      const lines = apiResult.split('\n').filter(line => line.trim().length > 0);
+      if (lines.length > 0) {
+        invoice.supplier = lines[0].trim();
+      }
+    }
+    
+    return invoice;
+  };
+
+  // Modify handleOcr to include Anthropic processing and extraction
   const handleOcr = async () => {
     if (!uploadedFile) return;
 
@@ -162,10 +290,17 @@ export function OcrProcessor({ onClose, isOpen }: OcrProcessorProps) {
       const extractedText = result.data.text;
       // Sanitize the extracted OCR text
       const sanitizedText = sanitizeText(extractedText);
-      setOcrResult(sanitizedText);
+
+      let processedText = sanitizedText;
+      if (processingMode === 'enhanced') {
+        // Use AI enhancement if selected
+        processedText = await processOcrWithAnthropic(sanitizedText);
+      }
+
+      setOcrResult(processedText);
       
-      // Extract invoice data from sanitized text
-      const extractedData = extractInvoiceData(sanitizedText);
+      // Extract invoice data from enhanced text
+      const extractedData = extractInvoiceDataFromApiResult(processedText);
       setExtractedInvoice(extractedData);
       setShowInvoiceForm(true);
     } catch (error) {
@@ -192,11 +327,17 @@ export function OcrProcessor({ onClose, isOpen }: OcrProcessorProps) {
       paymentType: '' // Dio Rod: new field initialization
     };
 
-    // Try to extract supplier name (usually one of the first lines)
-    const lines = text.split('\n').filter(line => line.trim().length > 0);
-    if (lines.length > 0) {
-      // Usually the first line is the company name
-      invoice.supplier = lines[0].trim();
+    // New supplier extraction using regex: capture uppercase/digit and punctuation before "RNC:"
+    const supplierMatch = text.match(/([A-ZÑÁÉÍÓÚ0-9\.\&\s]+?)\s+RNC:/i); // Dio Rod
+    if (supplierMatch && supplierMatch[1]) {
+      invoice.supplier = supplierMatch[1].trim();
+    }
+    // Fallback: if regex fails, use the first non-empty line
+    if (!invoice.supplier) {
+      const lines = text.split('\n').filter(line => line.trim().length > 0);
+      if (lines.length > 0) {
+        invoice.supplier = lines[0].trim();
+      }
     }
 
     // Try to extract date using regex patterns
@@ -301,12 +442,8 @@ export function OcrProcessor({ onClose, isOpen }: OcrProcessorProps) {
     const totalPattern = /(?:total a pagar|total factura|monto total|total general|importe total|valor total|total)[:\s]+([\d,\.]+)/i;
     // Updated: Use a more flexible pattern for subtotal extraction (sub-total allowed)
     const subtotalPattern = /sub[-\s]?total[:\s]+([\d,\.]+)/i;
-    const taxPatterns = [
-      /tax[:\s]+([\d,\.]+)/i,
-      /iva[:\s]+([\d,\.]+)/i,
-      /vat[:\s]+([\d,\.]+)/i,
-      /itbis[:\s]+([\d,\.]+)/i
-    ];
+    // New: Total Neto pattern matching
+    const totalNetoPattern = /total neto[:\s]+([\d,\.]+)/i;  // Dio Rod
 
     // Extract total
     const totalMatch = text.match(totalPattern);
@@ -314,13 +451,26 @@ export function OcrProcessor({ onClose, isOpen }: OcrProcessorProps) {
       invoice.total = parseFloat(totalMatch[1].replace(/,/g, ''));
     }
 
-    // Extract subtotal
-    const subtotalMatch = text.match(subtotalPattern);
+    // Extract subtotal using subtotal pattern
+    let subtotalMatch = text.match(subtotalPattern);
     if (subtotalMatch && subtotalMatch[1]) {
       invoice.subtotal = parseFloat(subtotalMatch[1].replace(/,/g, ''));
+    } else {
+      // If subtotal not found try matching total neto
+      const totalNetoMatch = text.match(totalNetoPattern);
+      if (totalNetoMatch && totalNetoMatch[1]) {
+        invoice.subtotal = parseFloat(totalNetoMatch[1].replace(/,/g, ''));
+      }
     }
 
     // Extract tax
+    const taxPatterns = [
+      /tax[:\s]+([\d,\.]+)/i,
+      /iva[:\s]+([\d,\.]+)/i,
+      /vat[:\s]+([\d,\.]+)/i,
+      /itbis[:\s]+([\d,\.]+)/i
+    ];
+
     for (const pattern of taxPatterns) {
       const match = text.match(pattern);
       if (match && match[1]) {
@@ -835,6 +985,19 @@ export function OcrProcessor({ onClose, isOpen }: OcrProcessorProps) {
               <li>Capture la imagen en un ángulo recto</li>
               <li>Puede pegar directamente imágenes desde el portapapeles usando Ctrl+V</li>
             </ul>
+          </div>
+        )}
+
+        {/* Debug toggle button for AI result inspection - Dio Rod */}
+        <button 
+          onClick={() => setShowDebugData(prev => !prev)}
+          className="absolute bottom-4 right-4 px-2 py-1 bg-yellow-600 text-white rounded-md text-xs hover:bg-yellow-700"
+        >
+          {showDebugData ? 'Ocultar Debug' : 'Mostrar Debug'}
+        </button>
+        {showDebugData && (
+          <div className="absolute bottom-16 right-4 bg-gray-800 text-green-300 p-4 rounded-md max-h-64 overflow-y-auto text-xs z-50">
+            <pre>{JSON.stringify({ ocrResult, extractedInvoice }, null, 2)}</pre>
           </div>
         )}
       </div>

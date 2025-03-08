@@ -1,0 +1,18 @@
+/*
+Dio Rod: OCR Receipt Prompt Instructions
+
+Using the above template, generate a digital invoice assigning each field’s value accordingly.
+Please clean the the text. we should be seing words and certain char like . : no \ or /.
+send back a numbered list
+1.Proveedor
+2. RCN:value
+3. NIF:value
+4. NCF:value
+5. Fecha:value
+6. Nº Factura:value
+7. Subtotal:value
+8. ITBIS:value
+9. Total:value
+10. Forma de Pag:value
+*/
+    
