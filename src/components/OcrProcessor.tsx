@@ -628,6 +628,126 @@ ${ocrResult}`;
   }
 };
 
+  // Add function to regenerate payment type using AI - Dio Rod
+const regeneratePaymentType = async () => {
+  if (!ocrResult) {
+    alert("No OCR data available for regeneration.");
+    return;
+  }
+  try {
+    const promptContent = `
+Extract the payment type from this receipt text. 
+Return ONLY a JSON object with format: {"paymentType": "Extracted Payment Type"}
+
+Example responses:
+{"paymentType": "Efectivo"}
+{"paymentType": "Tarjeta de Crédito"}
+
+Receipt text:
+${ocrResult}`;
+    const response = await anthropic.messages.create({
+      model: "claude-3-7-sonnet-20250219",
+      max_tokens: 1000,
+      temperature: 0.2,
+      messages: [{ role: "user", content: promptContent }],
+    });
+    console.log(JSON.stringify(response));
+    if (!response || !response.content || !Array.isArray(response.content) || response.content.length === 0) {
+      console.error('Invalid response format from API:', response);
+      return;
+    }
+    const responseContent = response.content;
+    if (!responseContent[0]) {
+      alert("Invalid response format from AI.");
+      return;
+    }
+    let paymentTypeJson = "";
+    // Use the response text directly without JSON.stringify to avoid double-encoding
+    if (typeof responseContent[0].text === "string") {
+      paymentTypeJson = responseContent[0].text;
+    } else if (typeof responseContent[0] === "string") {
+      paymentTypeJson = responseContent[0];
+    } else {
+      console.error("Unexpected content format:", responseContent);
+      return;
+    }
+    console.log("DEBUG: paymentTypeJson =", paymentTypeJson);
+    try {
+      const jsonData = JSON.parse(paymentTypeJson);
+      if (jsonData.paymentType) {
+        setExtractedInvoice(prev => ({ ...prev, paymentType: jsonData.paymentType }));
+      } else {
+        console.error('No paymentType found in JSON:', jsonData);
+      }
+    } catch (jsonError) {
+      console.error("Error parsing paymentType JSON:", jsonError);
+    }
+  } catch (error) {
+    console.error('Error regenerating paymentType:', error);
+  }
+};
+
+  // Add function to regenerate total using AI - Dio Rod
+const regenerateTotal = async () => {
+  if (!ocrResult) {
+    alert("No OCR data available for regeneration.");
+    return;
+  }
+  try {
+    const promptContent = `
+Extract the total amount from this receipt text. 
+Return ONLY a JSON object with format: {"total": "Extracted Total"}
+
+Example responses:
+{"total": "123.45"}
+{"total": "456.78"}
+
+Receipt text:
+${ocrResult}`;
+    const response = await anthropic.messages.create({
+      model: "claude-3-7-sonnet-20250219",
+      max_tokens: 1000,
+      temperature: 0.2,
+      messages: [{ role: "user", content: promptContent }],
+    });
+    console.log(JSON.stringify(response));
+    if (!response || !response.content || !Array.isArray(response.content) || response.content.length === 0) {
+      console.error('Invalid response format from API:', response);
+      return;
+    }
+    const responseContent = response.content;
+    if (!responseContent[0]) {
+      alert("Invalid response format from AI.");
+      return;
+    }
+    let totalJson = "";
+    // Use the response text directly without JSON.stringify to avoid double-encoding
+    if (typeof responseContent[0].text === "string") {
+      totalJson = responseContent[0].text;
+    } else if (typeof responseContent[0] === "string") {
+      totalJson = responseContent[0];
+    } else {
+      console.error("Unexpected content format:", responseContent);
+      return;
+    }
+    console.log("DEBUG: totalJson =", totalJson);
+    try {
+      const jsonData = JSON.parse(totalJson);
+      if (jsonData.total) {
+        // Parse the total, removing commas
+        const parsedTotal = parseFloat(jsonData.total.replace(/,/g, ''));
+        setExtractedInvoice(prev => ({ ...prev, total: parsedTotal }));
+      } else {
+        console.error('No total found in JSON:', jsonData);
+      }
+    } catch (jsonError) {
+      console.error("Error parsing total JSON:", jsonError);
+    }
+  } catch (error) {
+    console.error('Error regenerating total:', error);
+  }
+};
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
       <div 
@@ -898,12 +1018,21 @@ ${ocrResult}`;
                       Forma de Pago
                     </div>
                   </label>
-                  <input
-                    type="text"
-                    value={extractedInvoice.paymentType}
-                    onChange={(e) => setExtractedInvoice({...extractedInvoice, paymentType: e.target.value})}
-                    className="w-full px-3 py-2 bg-gray-600 border border-gray-500 rounded-md text-white"
-                  />
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="text"
+                      value={extractedInvoice.paymentType}
+                      onChange={(e) => setExtractedInvoice({...extractedInvoice, paymentType: e.target.value})}
+                      className="w-full px-3 py-2 bg-gray-600 border border-gray-500 rounded-md text-white"
+                    />
+                    <button 
+                      onClick={regeneratePaymentType} 
+                      className="px-2 py-1 bg-blue-600 text-white rounded text-xs"
+                      title="Regenerate payment type using AI"
+                    >
+                      Regenerate
+                    </button>
+                  </div>
                 </div>
               </div>
               
@@ -962,23 +1091,32 @@ ${ocrResult}`;
                       Total
                     </div>
                   </label>
-                  <input
-                    type="number"
-                    step="0.01"
-                    value={extractedInvoice.total}
-                    onChange={(e) => {
-                      const total = parseFloat(e.target.value) || 0;
-                      // Adjust subtotal if tax remains the same proportion
-                      const tax = extractedInvoice.tax;
-                      const subtotal = total - tax;
-                      setExtractedInvoice({
-                        ...extractedInvoice, 
-                        total,
-                        subtotal: subtotal > 0 ? subtotal : 0
-                      });
-                    }}
-                    className="w-full px-3 py-2 bg-gray-600 border border-gray-500 rounded-md text-white font-semibold"
-                  />
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="number"
+                      step="0.01"
+                      value={extractedInvoice.total}
+                      onChange={(e) => {
+                        const total = parseFloat(e.target.value) || 0;
+                        // Adjust subtotal if tax remains the same proportion
+                        const tax = extractedInvoice.tax;
+                        const subtotal = total - tax;
+                        setExtractedInvoice({
+                          ...extractedInvoice, 
+                          total,
+                          subtotal: subtotal > 0 ? subtotal : 0
+                        });
+                      }}
+                      className="w-full px-3 py-2 bg-gray-600 border border-gray-500 rounded-md text-white font-semibold"
+                    />
+                    <button 
+                      onClick={regenerateTotal} 
+                      className="px-2 py-1 bg-blue-600 text-white rounded text-xs"
+                      title="Regenerate total using AI"
+                    >
+                      Regenerate
+                    </button>
+                  </div>
                 </div>
               </div>
             </div>
@@ -1033,7 +1171,7 @@ ${ocrResult}`;
                       </div>
                       <div className="flex justify-between font-bold border-t border-gray-200 mt-2 pt-1">
                         <span>TOTAL:</span>
-                        <span>RD$ {extractedInvoice.total.toFixed(2)}</span>
+                        <span>RD$ {typeof extractedInvoice.total === 'number' ? extractedInvoice.total.toFixed(2) : '0.00'}</span>
                       </div>
                     </div>
                   </div>
