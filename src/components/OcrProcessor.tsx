@@ -51,7 +51,7 @@ export function OcrProcessor({ onClose, isOpen }: OcrProcessorProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [zoom, setZoom] = useState(false); // Dio Rod
   const [showDebugData, setShowDebugData] = useState(false); // Dio Rod
-  const [processingMode, setProcessingMode] = useState<'enhanced' | 'basic'>('enhanced'); // Dio Rod
+  const [enableAICleanup, setEnableAICleanup] = useState(false); // Dio Rod
 
   // Reset states when modal is opened
   useEffect(() => {
@@ -151,11 +151,15 @@ export function OcrProcessor({ onClose, isOpen }: OcrProcessorProps) {
   // Function to call Anthropic API for processing OCR data
   const processOcrWithAnthropic = async (text: string): Promise<string> => {
     try {
+      // Ask for a JSON formatted result with required keys 
+      const promptContent = `Extract the following invoice fields from the text and return a JSON object with keys:
+supplier, rcn, nif, ncf, date, invoiceNumber, subtotal, tax, total, paymentType.
+Text: ${text}`;
       const msg = await anthropic.messages.create({
         model: "claude-3-7-sonnet-20250219",
         max_tokens: 20000,
         temperature: 1,
-        messages: [{ role: "user", content: text }],
+        messages: [{ role: "user", content: promptContent }],
       });
       console.log(msg);
       return msg.choices[0].message.content;
@@ -166,106 +170,113 @@ export function OcrProcessor({ onClose, isOpen }: OcrProcessorProps) {
   };
 
   // Updated extraction mapping from AI results - Dio Rod
-  const extractInvoiceDataFromApiResult = (apiResult: string): ExtractedInvoice => {
-    const invoice: ExtractedInvoice = {
-      supplier: '',
-      rcn: '', // Dio Rod
-      nif: '', // Dio Rod: new field initialization
-      ncf: '', // Dio Rod: new field initialization
-      date: new Date().toISOString().split('T')[0],
-      invoiceNumber: '',
-      subtotal: 0,
-      tax: 0,
-      total: 0,
-      paymentType: '' // Dio Rod: new field initialization
-    };
-  
-    // Direct extractions
-    const supplierMatch = apiResult.match(/Supplier:\s*(.*)/i);
-    if (supplierMatch && supplierMatch[1]) {
-      invoice.supplier = supplierMatch[1].trim();
-    }
-    const dateMatch = apiResult.match(/Date:\s*(.*)/i);
-    if (dateMatch && dateMatch[1]) {
-      invoice.date = new Date(dateMatch[1].trim()).toISOString().split('T')[0];
-    }
-    const invoiceNumberMatch = apiResult.match(/Invoice Number:\s*(.*)/i);
-    if (invoiceNumberMatch && invoiceNumberMatch[1]) {
-      invoice.invoiceNumber = invoiceNumberMatch[1].trim();
-    }
-    const subtotalMatch = apiResult.match(/Subtotal:\s*([\d,\.]+)/i);
-    if (subtotalMatch && subtotalMatch[1]) {
-      invoice.subtotal = parseFloat(subtotalMatch[1].replace(/,/g, ''));
-    }
-    const taxMatch = apiResult.match(/Tax:\s*([\d,\.]+)/i);
-    if (taxMatch && taxMatch[1]) {
-      invoice.tax = parseFloat(taxMatch[1].replace(/,/g, ''));
-    }
-    const totalMatch = apiResult.match(/Total:\s*([\d,\.]+)/i);
-    if (totalMatch && totalMatch[1]) {
-      invoice.total = parseFloat(totalMatch[1].replace(/,/g, ''));
-    }
-    const paymentTypeMatch = apiResult.match(/Payment Type:\s*(.*)/i);
-    if (paymentTypeMatch && paymentTypeMatch[1]) {
-      invoice.paymentType = paymentTypeMatch[1].trim();
-    }
-    const rcnMatch = apiResult.match(/RCN:\s*(.*)/i);
-    if (rcnMatch && rcnMatch[1]) {
-      invoice.rcn = rcnMatch[1].trim();
-    }
-    const nifMatch = apiResult.match(/NIF:\s*(.*)/i);
-    if (nifMatch && nifMatch[1]) {
-      invoice.nif = nifMatch[1].trim();
-    }
-    const ncfMatch = apiResult.match(/NCF:\s*(.*)/i);
-    if (ncfMatch && ncfMatch[1]) {
-      invoice.ncf = ncfMatch[1].trim();
-    }
-    
-    // New extraction: Date from "FECHA" in DDMMYYYY format
-    const fechaMatch = apiResult.match(/FECHA\s+(\d{8})/i);
-    if (fechaMatch && fechaMatch[1]) {
-      const d = fechaMatch[1];
-      const day = d.substring(0,2);
-      const month = d.substring(2,4);
-      const year = d.substring(4,8);
-      invoice.date = new Date(`${year}-${month}-${day}`).toISOString().split('T')[0];
-    }
-  
-    // New extraction: Invoice number from "FACTURA P-..."
-    const facturaMatch = apiResult.match(/FACTURA\s+(P-\d+)/i);
-    if (facturaMatch && facturaMatch[1]) {
-      invoice.invoiceNumber = facturaMatch[1].trim();
-    }
-  
-    // Fallback: check for a "Vendor Info:" line if vendor fields are missing
-    const vendorInfoMatch = apiResult.match(/Vendor Info:\s*(.*)/i);
-    if (vendorInfoMatch && vendorInfoMatch[1]) {
-      const parts = vendorInfoMatch[1].split(',').map(part => part.trim());
-      if (!invoice.supplier && parts[0]) {
-        invoice.supplier = parts[0];
-      }
-      if (!invoice.rcn && parts[1]) {
-        invoice.rcn = parts[1];
-      }
-      if (!invoice.nif && parts[2]) {
-        invoice.nif = parts[2];
-      }
-      if (!invoice.ncf && parts[3]) {
-        invoice.ncf = parts[3];
-      }
-    }
-  
-    // Fallback for supplier: use first non-empty line if still empty
-    if (!invoice.supplier) {
-      const lines = apiResult.split('\n').filter(line => line.trim().length > 0);
-      if (lines.length > 0) {
-        invoice.supplier = lines[0].trim();
-      }
-    }
-    
-    return invoice;
-  };
+  // Update extractInvoiceDataFromApiResult for enhanced vendor (proveedor) extraction - Dio Rod
+const extractInvoiceDataFromApiResult = (apiResult: string): ExtractedInvoice => {
+	const invoice: ExtractedInvoice = {
+		supplier: '',
+		rcn: '', // Dio Rod
+		nif: '', // Dio Rod: new field initialization
+		ncf: '', // Dio Rod: new field initialization
+		date: new Date().toISOString().split('T')[0],
+		invoiceNumber: '',
+		subtotal: 0,
+		tax: 0,
+		total: 0,
+		paymentType: '' // Dio Rod: new field initialization
+	};
+
+	// Helper to clean up vendor names (proveedor) with new limits: max 6 words and 50 chars - Dio Rod
+	const cleanVendorName = (raw: string): string => {
+		// Remove unwanted chars except letters, numbers, space, &, and dot
+		let cleaned = raw.replace(/[^a-zA-Z0-9\s&.]/g, '').trim();
+		cleaned = cleaned.replace(/\s+/g, ' ');
+		// Only accept names with at least 2 words to avoid false positives
+		if (cleaned.split(' ').length < 2) {
+			return raw.trim();
+		}
+		// Limit to maximum 6 words
+		const words = cleaned.split(' ');
+		if (words.length > 6) {
+			cleaned = words.slice(0, 6).join(' ');
+		}
+		// Also limit to maximum 50 characters
+		if (cleaned.length > 50) {
+			cleaned = cleaned.substring(0, 50).trim();
+		}
+		return cleaned;
+	};
+
+	// Split text into trimmed, non-empty lines
+	const lines = apiResult.split('\n').map(line => line.trim()).filter(line => line.length > 0);
+
+	// Helper function to parse numbers, removing commas
+	const parseNumber = (str: string): number => parseFloat(str.replace(/,/g, ''));
+
+	lines.forEach(line => {
+		// Enhanced supplier extraction: if line doesn't include known fields and has at least two words
+		if (!invoice.supplier && !line.match(/(NIF|RCN|NCF|Fecha|Factura|Subtotal|Tax|Total|Forma de Pago)/i) && line.length > 3) {
+			if (line.split(/\s+/).length >= 2) {
+				invoice.supplier = cleanVendorName(line);
+			}
+		}
+
+		let match;
+		// Date: Match patterns like "Fecha: 12/05/2023" or "Date - 12-05-2023"
+		match = line.match(/(?:Date|Fecha)\s*[:\-]?\s*(\d{1,2}[\/\-\.]\d{1,2}[\/\-\.]\d{2,4})/i);
+		if (match && match[1]) {
+			try {
+				invoice.date = new Date(match[1].trim()).toISOString().split('T')[0];
+			} catch {}
+		}
+		// Invoice number: "Invoice Number" or "Factura" followed by a value
+		match = line.match(/(?:Invoice Number|Factura(?:\s*No)?)[\s:]*([\w\-]+)/i);
+		if (match && match[1]) {
+			invoice.invoiceNumber = match[1].trim();
+		}
+		// Subtotal: e.g., "Subtotal: 123.45"
+		match = line.match(/Subtotal\s*[:\-]?\s*([\d,\.]+)/i);
+		if (match && match[1]) {
+			invoice.subtotal = parseNumber(match[1]);
+		}
+		// Tax: Look for Tax, IVA, ITBIS, or VAT
+		match = line.match(/(?:Tax|IVA|ITBIS|VAT)\s*[:\-]?\s*([\d,\.]+)/i);
+		if (match && match[1]) {
+			invoice.tax = parseNumber(match[1]);
+		}
+		// Total: e.g., "Total: 123.45"
+		match = line.match(/Total\s*[:\-]?\s*([\d,\.]+)/i);
+		if (match && match[1]) {
+			invoice.total = parseNumber(match[1]);
+		}
+		// Payment Type: "Forma de Pago" or "Payment Type"
+		match = line.match(/(?:Forma de Pago|Payment Type)\s*[:\-]?\s*(.+)/i);
+		if (match && match[1]) {
+			invoice.paymentType = match[1].trim();
+		}
+		// RCN: try patterns like "RCN {value}" or "RNC:{value}"
+		match = line.match(/(?:RCN|RNC)\s*[:\-]?\s*(\S+)/i);
+		if (match && match[1]) {
+			invoice.rcn = match[1].trim();
+		}
+		// NIF: "NIF {value}" or "NIF:{value}"
+		match = line.match(/NIF\s*[:\-]?\s*(\S+)/i);
+		if (match && match[1]) {
+			invoice.nif = match[1].trim();
+		}
+		// NCF: "NCF {value}" or "NCF:{value}"
+		match = line.match(/NCF\s*[:\-]?\s*(\S+)/i);
+		if (match && match[1]) {
+			invoice.ncf = match[1].trim();
+		}
+	});
+
+	// Fallback: if supplier is still empty, use the very first line cleaned
+	if (!invoice.supplier && lines.length > 0) {
+		invoice.supplier = cleanVendorName(lines[0]);
+	}
+
+	return invoice;
+};
 
   // Modify handleOcr to include Anthropic processing and extraction
   const handleOcr = async () => {
@@ -288,19 +299,26 @@ export function OcrProcessor({ onClose, isOpen }: OcrProcessorProps) {
       );
 
       const extractedText = result.data.text;
-      // Sanitize the extracted OCR text
       const sanitizedText = sanitizeText(extractedText);
-
-      let processedText = sanitizedText;
-      if (processingMode === 'enhanced') {
-        // Use AI enhancement if selected
-        processedText = await processOcrWithAnthropic(sanitizedText);
-      }
-
-      setOcrResult(processedText);
       
-      // Extract invoice data from enhanced text
-      const extractedData = extractInvoiceDataFromApiResult(processedText);
+      let processedText: string;
+      let extractedData: ExtractedInvoice;
+
+      if (enableAICleanup) {
+        // Use AI cleanup requesting JSON output
+        processedText = await processOcrWithAnthropic(sanitizedText);
+        try {
+          extractedData = JSON.parse(processedText);
+        } catch (err) {
+          console.error('Error parsing AI JSON result, falling back to default extraction:', err);
+          extractedData = extractInvoiceDataFromApiResult(sanitizedText);
+        }
+      } else {
+        processedText = sanitizedText; // Default matching
+        extractedData = extractInvoiceDataFromApiResult(processedText);
+      }
+      
+      setOcrResult(processedText);
       setExtractedInvoice(extractedData);
       setShowInvoiceForm(true);
     } catch (error) {
@@ -551,6 +569,65 @@ export function OcrProcessor({ onClose, isOpen }: OcrProcessorProps) {
     }
   };
 
+  // Add function to regenerate vendor name using AI - Dio Rod
+const regenerateSupplier = async () => {
+  if (!ocrResult) {
+    alert("No OCR data available for regeneration.");
+    return;
+  }
+  try {
+    const promptContent = `
+Extract the supplier/vendor name from this receipt text. 
+Return ONLY a JSON object with format: {"supplier": "Extracted Name"}
+
+Example responses:
+{"supplier": "Supermercado Nacional"}
+{"supplier": "Ferretería García"}
+
+Receipt text:
+${ocrResult}`;
+    const response = await anthropic.messages.create({
+      model: "claude-3-7-sonnet-20250219",
+      max_tokens: 1000,
+      temperature: 0.2,
+      messages: [{ role: "user", content: promptContent }],
+    });
+    console.log(JSON.stringify(response));
+    if (!response || !response.content || !Array.isArray(response.content) || response.content.length === 0) {
+      console.error('Invalid response format from API:', response);
+      return;
+    }
+    const responseContent = response.content;
+    if (!responseContent[0]) {
+      alert("Invalid response format from AI.");
+      return;
+    }
+    let supplierJson = "";
+    // Use the response text directly without JSON.stringify to avoid double-encoding
+    if (typeof responseContent[0].text === "string") {
+      supplierJson = responseContent[0].text;
+    } else if (typeof responseContent[0] === "string") {
+      supplierJson = responseContent[0];
+    } else {
+      console.error("Unexpected content format:", responseContent);
+      return;
+    }
+    console.log("DEBUG: supplierJson =", supplierJson);
+    try {
+      const jsonData = JSON.parse(supplierJson);
+      if (jsonData.supplier) {
+        setExtractedInvoice(prev => ({ ...prev, supplier: jsonData.supplier }));
+      } else {
+        console.error('No supplier found in JSON:', jsonData);
+      }
+    } catch (jsonError) {
+      console.error("Error parsing supplier JSON:", jsonError);
+    }
+  } catch (error) {
+    console.error('Error regenerating vendor name:', error);
+  }
+};
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
       <div 
@@ -568,6 +645,20 @@ export function OcrProcessor({ onClose, isOpen }: OcrProcessorProps) {
           >
             <X size={24} />
           </button>
+        </div>
+
+        {/* AI Cleanup Toggle - Dio Rod */}
+        <div className="flex items-center gap-2 mb-4">
+          <input 
+            type="checkbox" 
+            id="toggleAICleanup"
+            checked={enableAICleanup}
+            onChange={() => setEnableAICleanup(prev => !prev)}
+            className="h-4 w-4 text-blue-600"
+          />
+          <label htmlFor="toggleAICleanup" className="text-white text-sm">
+            Enable AI Cleanup (JSON Output)
+          </label>
         </div>
 
         {!showInvoiceForm ? (
@@ -708,12 +799,21 @@ export function OcrProcessor({ onClose, isOpen }: OcrProcessorProps) {
                       Proveedor
                     </div>
                   </label>
-                  <input
-                    type="text"
-                    value={extractedInvoice.supplier}
-                    onChange={(e) => setExtractedInvoice({...extractedInvoice, supplier: e.target.value})}
-                    className="w-full px-3 py-2 bg-gray-600 border border-gray-500 rounded-md text-white"
-                  />
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="text"
+                      value={extractedInvoice.supplier}
+                      onChange={(e) => setExtractedInvoice({ ...extractedInvoice, supplier: e.target.value })}
+                      className="flex-grow px-3 py-2 bg-gray-600 border border-gray-500 rounded-md text-white"
+                    />
+                    <button 
+                      onClick={regenerateSupplier} 
+                      className="px-2 py-1 bg-blue-600 text-white rounded text-xs"
+                      title="Regenerate vendor name using AI"
+                    >
+                      Regenerate
+                    </button>
+                  </div>
                 </div>
                 
                 <div>
