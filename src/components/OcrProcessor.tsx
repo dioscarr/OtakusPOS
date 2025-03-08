@@ -628,6 +628,65 @@ ${ocrResult}`;
   }
 };
 
+  // Add function to regenerate invoice number using AI - Dio Rod
+const regenerateInvoiceNumber = async () => {
+  if (!ocrResult) {
+    alert("No OCR data available for regeneration.");
+    return;
+  }
+  try {
+    const promptContent = `
+Extract the invoice number from this receipt text. 
+Return ONLY a JSON object with format: {"invoiceNumber": "Extracted Invoice Number"}
+
+Example responses:
+{"invoiceNumber": "12345"}
+{"invoiceNumber": "INV-2024-001"}
+
+Receipt text:
+${ocrResult}`;
+    const response = await anthropic.messages.create({
+      model: "claude-3-7-sonnet-20250219",
+      max_tokens: 1000,
+      temperature: 0.2,
+      messages: [{ role: "user", content: promptContent }],
+    });
+    console.log(JSON.stringify(response));
+    if (!response || !response.content || !Array.isArray(response.content) || response.content.length === 0) {
+      console.error('Invalid response format from API:', response);
+      return;
+    }
+    const responseContent = response.content;
+    if (!responseContent[0]) {
+      alert("Invalid response format from AI.");
+      return;
+    }
+    let invoiceNumberJson = "";
+    // Use the response text directly without JSON.stringify to avoid double-encoding
+    if (typeof responseContent[0].text === "string") {
+      invoiceNumberJson = responseContent[0].text;
+    } else if (typeof responseContent[0] === "string") {
+      invoiceNumberJson = responseContent[0];
+    } else {
+      console.error("Unexpected content format:", responseContent);
+      return;
+    }
+    console.log("DEBUG: invoiceNumberJson =", invoiceNumberJson);
+    try {
+      const jsonData = JSON.parse(invoiceNumberJson);
+      if (jsonData.invoiceNumber) {
+        setExtractedInvoice(prev => ({ ...prev, invoiceNumber: jsonData.invoiceNumber }));
+      } else {
+        console.error('No invoiceNumber found in JSON:', jsonData);
+      }
+    } catch (jsonError) {
+      console.error("Error parsing invoiceNumber JSON:", jsonError);
+    }
+  } catch (error) {
+    console.error('Error regenerating invoiceNumber:', error);
+  }
+};
+
   // Add function to regenerate payment type using AI - Dio Rod
 const regeneratePaymentType = async () => {
   if (!ocrResult) {
@@ -958,12 +1017,21 @@ ${ocrResult}`;
                       Número de Factura
                     </div>
                   </label>
-                  <input
-                    type="text"
-                    value={extractedInvoice.invoiceNumber}
-                    onChange={(e) => setExtractedInvoice({...extractedInvoice, invoiceNumber: e.target.value})}
-                    className="w-full px-3 py-2 bg-gray-600 border border-gray-500 rounded-md text-white"
-                  />
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="text"
+                      value={extractedInvoice.invoiceNumber}
+                      onChange={(e) => setExtractedInvoice({...extractedInvoice, invoiceNumber: e.target.value})}
+                      className="w-full px-3 py-2 bg-gray-600 border border-gray-500 rounded-md text-white"
+                    />
+                    <button 
+                      onClick={regenerateInvoiceNumber} 
+                      className="px-2 py-1 bg-blue-600 text-white rounded text-xs"
+                      title="Regenerate invoice number using AI"
+                    >
+                      Regenerate
+                    </button>
+                  </div>
                 </div>
 
                 <div>
