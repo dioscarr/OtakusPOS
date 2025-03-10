@@ -86,6 +86,7 @@ export function OcrProcessor({ onClose, isOpen, onOcrComplete }: OcrProcessorPro
         paymentType: '' // Dio Rod: new field default
       });
       setInvoiceGenerated(false);
+     
     }
   }, [isOpen]);
 
