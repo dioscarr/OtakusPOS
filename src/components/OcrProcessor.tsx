@@ -1227,7 +1227,7 @@ const handleOcrCompleteInternal = (data: any) => {
                       : 'bg-gray-600 text-gray-300'
                   }`}
                 >
-                  {enableAICleanup ? 'AI Cleanup On' : 'AI Cleanup Off'} {/* Dio Rod */}
+                  {enableAICleanup ? 'AI' : 'AI'} {/* Dio Rod */}
                 </button>
                 <button
                   onClick={handleOcr}
