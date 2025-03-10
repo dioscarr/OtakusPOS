@@ -1,5 +1,5 @@
 // Dio Rod
-import { supabase } from '../lib/supabaseClient';
+import { supabase } from '../lib/supabase';
 
 export interface OcrResult {
   id?: string;

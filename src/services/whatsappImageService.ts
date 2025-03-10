@@ -17,7 +17,7 @@ interface AISensysResponse {
 
 export class WhatsappImageService {
   private _apiKey: string;
-  private _baseUrl: string = 'https://api.aisensys.com/v1';
+  private _baseUrl: string = 'https://v1.api.aisensys.com'; // Update the base URL as needed
   
   constructor() {
     this._apiKey = import.meta.env.VITE_AISENSYS_API_KEY;

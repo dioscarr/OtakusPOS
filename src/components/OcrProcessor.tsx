@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { X, Upload, Clipboard, FileScan, Save, DollarSign, Calendar, User, FileText, Image } from 'lucide-react';
+import { X, Upload, Clipboard, FileScan, Save, DollarSign, Calendar, User, FileText, Image, RefreshCw } from 'lucide-react';
 import Tesseract from 'tesseract.js';
 import { supabase } from '../lib/supabase'; // Import Supabase client
 import Anthropic from "@anthropic-ai/sdk"; // Dio Rod
@@ -7,6 +7,7 @@ import Anthropic from "@anthropic-ai/sdk"; // Dio Rod
 interface OcrProcessorProps {
   onClose: () => void;
   isOpen: boolean;
+  onOcrComplete?: (data: any) => void; // Add onOcrComplete prop
 }
 
 interface ExtractedInvoice {
@@ -28,7 +29,7 @@ const anthropic = new Anthropic({
   dangerouslyAllowBrowser: true // Dio Rod
 });
 
-export function OcrProcessor({ onClose, isOpen }: OcrProcessorProps) {
+export function OcrProcessor({ onClose, isOpen, onOcrComplete }: OcrProcessorProps) {
   const [isProcessing, setIsProcessing] = useState(false);
   const [uploadedFile, setUploadedFile] = useState<File | null>(null);
   const [imagePreview, setImagePreview] = useState<string | null>(null);
@@ -52,6 +53,17 @@ export function OcrProcessor({ onClose, isOpen }: OcrProcessorProps) {
   const [zoom, setZoom] = useState(false); // Dio Rod
   const [showDebugData, setShowDebugData] = useState(false); // Dio Rod
   const [enableAICleanup, setEnableAICleanup] = useState(false); // Dio Rod
+  const [isRegeneratingFecha, setIsRegeneratingFecha] = useState(false); // Dio Rod
+  const [isRegeneratingSubtotal, setIsRegeneratingSubtotal] = useState(false); // Dio Rod
+  const [isRegeneratingRCN, setIsRegeneratingRCN] = useState(false); // Dio Rod
+  const [isRegeneratingNIF, setIsRegeneratingNIF] = useState(false); // Dio Rod
+  const [isRegeneratingNCF, setIsRegeneratingNCF] = useState(false); // Dio Rod
+  const [isRegeneratingSupplier, setIsRegeneratingSupplier] = useState(false); // Dio Rod: new state for supplier regeneration
+  const [isRegeneratingInvoiceNumber, setIsRegeneratingInvoiceNumber] = useState(false); // Dio Rod: new state for invoice number regeneration
+  const [isRegeneratingPaymentType, setIsRegeneratingPaymentType] = useState(false); // Dio Rod: new state for payment type regeneration
+  const [isRegeneratingTotal, setIsRegeneratingTotal] = useState(false); // Dio Rod: new state for total regeneration
+  const [hasProcessedOcr, set_hasProcessedOcr] = useState(false); // New state to check if OCR has been processed
+  const [ocrRawText, set_ocrRawText] = useState('');
 
   // Reset states when modal is opened
   useEffect(() => {
@@ -151,6 +163,7 @@ export function OcrProcessor({ onClose, isOpen }: OcrProcessorProps) {
   // Function to call Anthropic API for processing OCR data
   const processOcrWithAnthropic = async (text: string): Promise<string> => {
     try {
+      const fullPrompt = buildAiPrompt(text);
       // Ask for a JSON formatted result with required keys 
       const promptContent = `Extract the following invoice fields from the text and return a JSON object with keys:
 supplier, rcn, nif, ncf, date, invoiceNumber, subtotal, tax, total, paymentType.
@@ -308,7 +321,31 @@ const extractInvoiceDataFromApiResult = (apiResult: string): ExtractedInvoice =>
         // Use AI cleanup requesting JSON output
         processedText = await processOcrWithAnthropic(sanitizedText);
         try {
-          extractedData = JSON.parse(processedText);
+          // Dio Rod: extract the content within ```json ... ```
+          let jsonBlock = processedText.match(/```json\s*([\s\S]*?)```/);
+          if (!jsonBlock) {
+            // fallback: try matching any {...} block
+            jsonBlock = processedText.match(/\{[\s\S]*\}/);
+          }
+          if (!jsonBlock) throw new Error("Unable to extract JSON block.");
+
+          extractedData = JSON.parse(jsonBlock[1] || jsonBlock[0]);
+          // Clean fields
+          extractedData.supplier = extractedData.supplier?.trim() || '';
+          if (typeof extractedData.subtotal === 'string') {
+            extractedData.subtotal = parseFloat(extractedData.subtotal.replace(/,/g, '')) || 0;
+          }
+          if (typeof extractedData.tax === 'string') {
+            extractedData.tax = parseFloat(extractedData.tax.replace(/,/g, '')) || 0;
+          }
+          if (typeof extractedData.total === 'string') {
+            extractedData.total = parseFloat(extractedData.total.replace(/,/g, '')) || 0;
+          }
+          // Check if date is 8 digits (DDMMYYYY), parse to DD/MM/YYYY
+          if (/^\d{8}$/.test(extractedData.date)) {
+            const d = extractedData.date;
+            extractedData.date = `${d.slice(0,2)}/${d.slice(2,4)}/${d.slice(4,8)}`;
+          }
         } catch (err) {
           console.error('Error parsing AI JSON result, falling back to default extraction:', err);
           extractedData = extractInvoiceDataFromApiResult(sanitizedText);
@@ -321,6 +358,8 @@ const extractInvoiceDataFromApiResult = (apiResult: string): ExtractedInvoice =>
       setOcrResult(processedText);
       setExtractedInvoice(extractedData);
       setShowInvoiceForm(true);
+      set_hasProcessedOcr(true); // Mark OCR as processed
+      set_ocrRawText(extractedText); // Store raw OCR text
     } catch (error) {
       console.error('Error performing OCR:', error);
       setOcrResult(`Error: ${error.message || 'Unknown error occurred during OCR'}`);
@@ -575,6 +614,7 @@ const regenerateSupplier = async () => {
     alert("No OCR data available for regeneration.");
     return;
   }
+  setIsRegeneratingSupplier(true);
   try {
     const promptContent = `
 Extract the supplier/vendor name from this receipt text. 
@@ -582,7 +622,6 @@ Return ONLY a JSON object with format: {"supplier": "Extracted Name"}
 
 Example responses:
 {"supplier": "Supermercado Nacional"}
-{"supplier": "Ferretería García"}
 
 Receipt text:
 ${ocrResult}`;
@@ -625,6 +664,8 @@ ${ocrResult}`;
     }
   } catch (error) {
     console.error('Error regenerating vendor name:', error);
+  } finally {
+    setIsRegeneratingSupplier(false);
   }
 };
 
@@ -634,6 +675,7 @@ const regenerateInvoiceNumber = async () => {
     alert("No OCR data available for regeneration.");
     return;
   }
+  setIsRegeneratingInvoiceNumber(true);
   try {
     const promptContent = `
 Extract the invoice number from this receipt text. 
@@ -684,6 +726,8 @@ ${ocrResult}`;
     }
   } catch (error) {
     console.error('Error regenerating invoiceNumber:', error);
+  } finally {
+    setIsRegeneratingInvoiceNumber(false);
   }
 };
 
@@ -693,6 +737,7 @@ const regeneratePaymentType = async () => {
     alert("No OCR data available for regeneration.");
     return;
   }
+  setIsRegeneratingPaymentType(true);
   try {
     const promptContent = `
 Extract the payment type from this receipt text. 
@@ -743,6 +788,8 @@ ${ocrResult}`;
     }
   } catch (error) {
     console.error('Error regenerating paymentType:', error);
+  } finally {
+    setIsRegeneratingPaymentType(false);
   }
 };
 
@@ -752,6 +799,7 @@ const regenerateTotal = async () => {
     alert("No OCR data available for regeneration.");
     return;
   }
+  setIsRegeneratingTotal(true);
   try {
     const promptContent = `
 Extract the total amount from this receipt text. 
@@ -804,7 +852,263 @@ ${ocrResult}`;
     }
   } catch (error) {
     console.error('Error regenerating total:', error);
+  } finally {
+    setIsRegeneratingTotal(false);
   }
+};
+
+// Dio Rod: Add function to regenerate subtotal, RCN, and NCF from the OCR text
+const regenerateSubtotalRCNNCF = async () => {
+  if (!ocrResult) {
+    alert("No OCR data available for regeneration.");
+    return;
+  }
+  setIsRegeneratingSubtotal(true);
+  try {
+    const promptContent = `
+Extract the subtotal, RCN, NIF and NCF from this receipt text.
+Return ONLY a JSON object with format: {"subtotal": "value", "rcn": "value", "nif": "value", "ncf": "value"}
+
+Receipt text:
+${ocrResult}
+    `;
+    const response = await anthropic.messages.create({
+      model: "claude-3-7-sonnet-20250219",
+      max_tokens: 1000,
+      temperature: 0.2,
+      messages: [{ role: "user", content: promptContent }],
+    });
+    console.log(JSON.stringify(response));
+    let regenJson = "";
+    if (typeof response.content[0].text === "string") {
+      regenJson = response.content[0].text;
+    } else if (typeof response.content[0] === "string") {
+      regenJson = response.content[0];
+    } else {
+      console.error("Unexpected content format:", response.content);
+      return;
+    }
+    console.log("DEBUG: regenSubtotalRCNNCF =", regenJson);
+    try {
+      const jsonData = JSON.parse(regenJson);
+      if (jsonData.subtotal) {
+        const newSubtotal = parseFloat(jsonData.subtotal.replace(/,/g, ''));
+        setExtractedInvoice(prev => ({ ...prev, subtotal: newSubtotal }));
+      }
+      if (jsonData.rcn) {
+        setExtractedInvoice(prev => ({ ...prev, rcn: jsonData.rcn.trim() }));
+      }
+      if (jsonData.nif) {
+        setExtractedInvoice(prev => ({ ...prev, nif: jsonData.nif.trim() }));
+      }
+      if (jsonData.ncf) {
+        setExtractedInvoice(prev => ({ ...prev, ncf: jsonData.ncf.trim() }));
+      }
+    } catch (jsonError) {
+      console.error("Error parsing regeneration JSON:", jsonError);
+    }
+  } catch (error) {
+    console.error("Error regenerating subtotal, RCN, NIF and NCF:", error);
+  } finally {
+    setIsRegeneratingSubtotal(false);
+  }
+};
+
+// Dio Rod: Add function to regenerate Fecha (in DD/MM/YYYY format)
+const regenerateFecha = async () => {
+  if (!ocrResult) {
+    alert("No OCR data available for regeneration.");
+    return;
+  }
+  setIsRegeneratingFecha(true);
+  try {
+    const promptContent = `
+Extract the date from the receipt text.
+Return ONLY a JSON object with format: {"fecha": "DD/MM/YYYY"}
+
+Receipt text:
+${ocrResult}
+    `;
+    const response = await anthropic.messages.create({
+      model: "claude-3-7-sonnet-20250219",
+      max_tokens: 1000,
+      temperature: 0.2,
+      messages: [{ role: "user", content: promptContent }],
+    });
+    let fechaJson = "";
+    if (typeof response.content[0].text === "string") {
+      fechaJson = response.content[0].text;
+    } else if (typeof response.content[0] === "string") {
+      fechaJson = response.content[0];
+    } else {
+      console.error("Unexpected content format:", response.content);
+      return;
+    }
+    const jsonData = JSON.parse(fechaJson);
+    if (jsonData.fecha) {
+      setExtractedInvoice(prev => ({ ...prev, date: jsonData.fecha }));
+    }
+  } catch (error) {
+    console.error("Error regenerating fecha:", error);
+  } finally {
+    setIsRegeneratingFecha(false);
+  }
+};
+
+// New helper function to regenerate single field
+const regenerateField = async (field: 'rcn' | 'nif' | 'ncf' | 'subtotal') => {
+  if (!ocrResult) {
+    alert("No OCR data available for regeneration.");
+    return;
+  }
+  // Set corresponding regeneration state true
+  if (field === 'rcn') setIsRegeneratingRCN(true);
+  if (field === 'nif') setIsRegeneratingNIF(true);
+  if (field === 'ncf') setIsRegeneratingNCF(true);
+  if (field === 'subtotal') setIsRegeneratingSubtotal(true);
+  
+  try {
+    const promptContent = `Extract the ${field.toUpperCase()} value from the receipt text.
+Return ONLY a JSON object with format: {"${field}": "value"}
+    
+Receipt text:
+${ocrResult}`;
+    const response = await anthropic.messages.create({
+      model: "claude-3-7-sonnet-20250219",
+      max_tokens: 1000,
+      temperature: 0.2,
+      messages: [{ role: "user", content: promptContent }],
+    });
+    let fieldJson = "";
+    if (typeof response.content[0].text === "string") {
+      fieldJson = response.content[0].text;
+    } else if (typeof response.content[0] === "string") {
+      fieldJson = response.content[0];
+    } else {
+      console.error("Unexpected content format:", response.content);
+      return;
+    }
+    const jsonData = JSON.parse(fieldJson);
+    if (jsonData[field]) {
+      setExtractedInvoice(prev => ({
+        ...prev,
+        [field]: field === 'subtotal'
+          ? parseFloat(jsonData[field].replace(/,/g, ''))
+          : jsonData[field].trim()
+      }));
+    }
+  } catch (error) {
+    console.error(`Error regenerating ${field}:`, error);
+  } finally {
+    if (field === 'rcn') setIsRegeneratingRCN(false);
+    if (field === 'nif') setIsRegeneratingNIF(false);
+    if (field === 'ncf') setIsRegeneratingNCF(false);
+    if (field === 'subtotal') setIsRegeneratingSubtotal(false);
+  }
+};
+
+/**
+ * Build a prompt asking the AI to return an object with the following fields:
+ * - supplier
+ * - rcn
+ * - nif
+ * - ncf
+ * - date
+ * - invoiceNumber
+ * - subtotal
+ * - tax
+ * - total
+ * - paymentType
+ */
+// Update buildAiPrompt to include instructions for ambiguous ITBIS fields
+function buildAiPrompt(ocrText: string): string {
+  return `
+Please analyze the following text and extract a JSON object in this exact format:
+{
+  "supplier": "",
+  "rcn": "",
+  "nif": "",
+  "ncf": "",
+  "date": "",
+  "invoiceNumber": "",
+  "subtotal": "",
+  "tax": "",
+  "total": "",
+  "paymentType": ""
+}
+
+Note: Some receipts may display a section third column such as "description, itbis (tax) and total" where the total amount already includes ITBIS. In that case, please separate the subtotal and ITBIS (tax) so that:
+- "subtotal" is the amount without tax,
+- "tax" is the ITBIS portion,
+- "total" remains as the gross amount.
+
+Return only the JSON object with these fields.
+
+Text to analyze:
+${ocrText}
+`.trim();
+}
+
+function generateFullOcrPrompt(ocrRawData: string): string {
+  return `
+Please analyze the following OCR raw data and extract a JSON object in this exact format:
+{
+  "supplier": "",
+  "rcn": "",
+  "nif": "",
+  "ncf": "",
+  "date": "",
+  "invoiceNumber": "",
+  "subtotal": 0,
+  "tax": 0,
+  "total": 0,
+  "paymentType": ""
+}
+
+Note:
+- Handle cases where the total includes tax (ITBIS) by splitting out subtotal and tax.
+- Return only the JSON object as the response.
+
+OCR Raw Data:
+${ocrRawData}
+`.trim();
+}
+
+async function handleRegenerateAllFields(ocrRawData: string) {
+  try {
+    const prompt = generateFullOcrPrompt(ocrRawData);
+    // Placeholder for actual Anthropic call
+    const response = await someAnthropicApiCall(prompt);
+    // ...handle the response...
+    console.log("Anthropic full OCR fields response", response);
+  } catch (err) {
+    console.error("Error regenerating all fields:", err);
+  }
+}
+
+async function handleRegenerateAll() {
+  if (!onOcrComplete || !ocrRawText) {
+    console.warn("No onOcrComplete function or no OCR data available.");
+    return;
+  }
+  try {
+    const prompt = generateFullOcrPrompt(ocrRawText);
+    console.log("Sending prompt to Anthropic:", prompt);
+    const anthropicResponse = await someAnthropicApiCall(prompt);
+    console.log("Anthropic response:", anthropicResponse);
+
+    const parsedData = JSON.parse(anthropicResponse);
+    onOcrComplete(parsedData);
+  } catch (error) {
+    console.error("Error regenerating all fields:", error);
+  }
+}
+
+// Wrap original OCR completion
+const handleOcrCompleteInternal = (data: any) => {
+  set_hasProcessedOcr(true);
+  set_ocrRawText(data?.rawText || '');
+  onOcrComplete?.(data);
 };
 
   return (
@@ -818,26 +1122,22 @@ ${ocrResult}`;
             <FileScan size={24} className="text-[#D80000]" /> {/* Dio Rod */}
             {showInvoiceForm ? "Creación de Factura Digital" : "Procesamiento OCR de Recibos"}
           </h2>
-          <button
-            onClick={onClose}
-            className="text-gray-400 hover:text-gray-300"
-          >
-            <X size={24} />
-          </button>
-        </div>
-
-        {/* AI Cleanup Toggle - Dio Rod */}
-        <div className="flex items-center gap-2 mb-4">
-          <input 
-            type="checkbox" 
-            id="toggleAICleanup"
-            checked={enableAICleanup}
-            onChange={() => setEnableAICleanup(prev => !prev)}
-            className="h-4 w-4 text-blue-600"
-          />
-          <label htmlFor="toggleAICleanup" className="text-white text-sm">
-            Enable AI Cleanup (JSON Output)
-          </label>
+          <div className="flex gap-2">
+            {hasProcessedOcr && (
+              <button
+                onClick={handleRegenerateAll}
+                className="px-4 py-2 bg-slate-700 hover:bg-slate-800 text-white rounded-md"
+              >
+                Regenerate All Fields
+              </button>
+            )}
+            <button
+              onClick={onClose}
+              className="text-gray-400 hover:text-gray-300"
+            >
+              <X size={24} />
+            </button>
+          </div>
         </div>
 
         {!showInvoiceForm ? (
@@ -892,28 +1192,40 @@ ${ocrResult}`;
                   </div>
                 )}
               </div>
-
-              <button
-                onClick={handleOcr}
-                disabled={isProcessing || !uploadedFile}
-                className={`w-full py-2 px-4 rounded-md flex justify-center items-center gap-2 ${
-                  !isProcessing && uploadedFile
-                    ? 'bg-blue-600 hover:bg-blue-700 text-white'
-                    : 'bg-gray-600 text-gray-400 cursor-not-allowed'
-                }`}
-              >
-                {isProcessing ? (
-                  <>
-                    <svg className="animate-spin h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                    </svg>
-                    <span>Procesando...{Math.round(ocrProgress)}%</span>
-                  </>
-                ) : (
-                  <span>Procesar con OCR</span>
-                )}
-              </button>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => setEnableAICleanup(prev => !prev)}
+                  className={`px-3 py-2 rounded-md ${
+                    enableAICleanup
+                      ? 'bg-red-600 text-white'
+                      : 'bg-gray-600 text-gray-300'
+                  }`}
+                >
+                  {enableAICleanup ? 'AI Cleanup On' : 'AI Cleanup Off'} {/* Dio Rod */}
+                </button>
+                <button
+                  onClick={handleOcr}
+                  disabled={isProcessing || !uploadedFile}
+                  className={`w-full py-2 px-4 rounded-md flex justify-center items-center gap-2 ${
+                    !isProcessing && uploadedFile
+                      ? 'bg-red-600 hover:bg-blue-700 text-white'
+                      : 'bg-gray-600 text-gray-400 cursor-not-allowed'
+                  }`}
+                >
+                  Procesar con OCR
+                  {isProcessing ? (
+                    <>
+                      <svg className="animate-spin h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                      </svg>
+                      <span>Procesando...{Math.round(ocrProgress)}%</span>
+                    </>
+                  ) : (
+                    <span>Procesar con OCR</span>
+                  )}
+                </button>
+              </div>
             </div>
 
             <div className="bg-gray-700 p-4 rounded-lg">
@@ -958,7 +1270,7 @@ ${ocrResult}`;
                   <div className="pt-4">
                     <button
                       onClick={onClose}
-                      className="bg-blue-600 hover:bg-blue-700 text-white py-2 px-6 rounded-md"
+                      className="bg-red-600 hover:bg-blue-700 text-white py-2 px-6 rounded-md"
                     >
                       Cerrar
                     </button>
@@ -978,19 +1290,26 @@ ${ocrResult}`;
                       Proveedor
                     </div>
                   </label>
-                  <div className="flex items-center gap-2">
+                  <div className="flex">
                     <input
                       type="text"
                       value={extractedInvoice.supplier}
                       onChange={(e) => setExtractedInvoice({ ...extractedInvoice, supplier: e.target.value })}
                       className="flex-grow px-3 py-2 bg-gray-600 border border-gray-500 rounded-md text-white"
                     />
-                    <button 
-                      onClick={regenerateSupplier} 
-                      className="px-2 py-1 bg-blue-600 text-white rounded text-xs"
-                      title="Regenerate vendor name using AI"
+                    <button
+                      onClick={regenerateSupplier}
+                      className="ml-2 px-3 py-2 bg-red-600  text-white rounded-md hover:bg-blue-700"
+                      disabled={isRegeneratingSupplier}
                     >
-                      Regenerate
+                      {isRegeneratingSupplier ? (
+                        <svg className="animate-spin h-5 w-5" viewBox="0 0 24 24">
+                          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
+                          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/>
+                        </svg>
+                      ) : (
+                        <RefreshCw size={16} />
+                      )}
                     </button>
                   </div>
                 </div>
@@ -1002,14 +1321,33 @@ ${ocrResult}`;
                       Fecha
                     </div>
                   </label>
-                  <input
-                    type="date"
-                    value={extractedInvoice.date}
-                    onChange={(e) => setExtractedInvoice({...extractedInvoice, date: e.target.value})}
-                    className="w-full px-3 py-2 bg-gray-600 border border-gray-500 rounded-md text-white"
-                  />
+                  <div className="flex gap-2">
+                    <input
+                      type="text"
+                      value={extractedInvoice.date}
+                      onChange={(e) =>
+                        setExtractedInvoice({ ...extractedInvoice, date: e.target.value })
+                      }
+                      placeholder="DD/MM/YYYY"
+                      className="flex-grow px-3 py-2 bg-gray-600 border border-gray-500 rounded-md text-white"
+                    />                   
+                    <button
+                      onClick={regenerateFecha}
+                      className="ml-2 px-3 py-2 bg-red-600  text-white rounded-md hover:bg-blue-700"
+                      disabled={isRegeneratingFecha}
+                    >
+                      {isRegeneratingFecha ? (
+                        <svg className="animate-spin h-5 w-5" viewBox="0 0 24 24">
+                          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
+                          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/>
+                        </svg>
+                      ) : (
+                        <RefreshCw size={16} />
+                      )}
+                    </button>
+                  </div>
+                
                 </div>
-
                 <div>
                   <label className="block text-sm font-medium text-gray-300 mb-1">
                     <div className="flex items-center gap-2">
@@ -1017,19 +1355,26 @@ ${ocrResult}`;
                       Número de Factura
                     </div>
                   </label>
-                  <div className="flex items-center gap-2">
+                  <div className="flex">
                     <input
                       type="text"
                       value={extractedInvoice.invoiceNumber}
                       onChange={(e) => setExtractedInvoice({...extractedInvoice, invoiceNumber: e.target.value})}
-                      className="w-full px-3 py-2 bg-gray-600 border border-gray-500 rounded-md text-white"
+                      className="flex-grow px-3 py-2 bg-gray-600 border border-gray-500 rounded-md text-white"
                     />
-                    <button 
-                      onClick={regenerateInvoiceNumber} 
-                      className="px-2 py-1 bg-blue-600 text-white rounded text-xs"
-                      title="Regenerate invoice number using AI"
+                    <button
+                      onClick={regenerateInvoiceNumber}
+                      className="ml-2 px-3 py-2 bg-red-600  text-white rounded-md hover:bg-blue-700"
+                      disabled={isRegeneratingInvoiceNumber}
                     >
-                      Regenerate
+                      {isRegeneratingInvoiceNumber ? (
+                        <svg className="animate-spin h-5 w-5" viewBox="0 0 24 24">
+                          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
+                          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/>
+                        </svg>
+                      ) : (
+                        <RefreshCw size={16} />
+                      )}
                     </button>
                   </div>
                 </div>
@@ -1041,12 +1386,25 @@ ${ocrResult}`;
                       RCN
                     </div>
                   </label>
-                  <input
-                    type="text"
-                    value={extractedInvoice.rcn}
-                    onChange={(e) => setExtractedInvoice({...extractedInvoice, rcn: e.target.value})}
-                    className="w-full px-3 py-2 bg-gray-600 border border-gray-500 rounded-md text-white"
-                  />
+                  <div className="flex">
+                    <input
+                      type="text"
+                      value={extractedInvoice.rcn}
+                      onChange={(e) => setExtractedInvoice({...extractedInvoice, rcn: e.target.value})}
+                      className="flex-grow px-3 py-2 bg-gray-600 border border-gray-500 rounded-md text-white"
+                    />
+                    <button
+                      onClick={() => regenerateField('rcn')}
+                      className="ml-2 px-3 py-2 bg-red-600 text-white rounded-md hover:bg-blue-700"
+                      disabled={isRegeneratingRCN}
+                    >
+                      {isRegeneratingRCN ? (
+                        <svg className="animate-spin h-5 w-5" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path></svg>
+                      ) : (
+                        <RefreshCw size={16} />
+                      )}
+                    </button>
+                  </div>
                 </div>
                 {/* New: NIF input field */}
                 <div>
@@ -1056,12 +1414,25 @@ ${ocrResult}`;
                       NIF
                     </div>
                   </label>
-                  <input
-                    type="text"
-                    value={extractedInvoice.nif}
-                    onChange={(e) => setExtractedInvoice({...extractedInvoice, nif: e.target.value})}
-                    className="w-full px-3 py-2 bg-gray-600 border border-gray-500 rounded-md text-white"
-                  />
+                  <div className="flex">
+                    <input
+                      type="text"
+                      value={extractedInvoice.nif}
+                      onChange={(e) => setExtractedInvoice({...extractedInvoice, nif: e.target.value})}
+                      className="flex-grow px-3 py-2 bg-gray-600 border border-gray-500 rounded-md text-white"
+                    />
+                    <button
+                      onClick={() => regenerateField('nif')}
+                      className="ml-2 px-3 py-2 bg-red-600 text-white rounded-md hover:bg-blue-700"
+                      disabled={isRegeneratingNIF}
+                    >
+                      {isRegeneratingNIF ? (
+                        <svg className="animate-spin h-5 w-5" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path></svg>
+                      ) : (
+                        <RefreshCw size={16} />
+                      )}
+                    </button>
+                  </div>
                 </div>
                 {/* New: NCF input field */}
                 <div>
@@ -1071,12 +1442,25 @@ ${ocrResult}`;
                       NCF
                     </div>
                   </label>
-                  <input
-                    type="text"
-                    value={extractedInvoice.ncf}
-                    onChange={(e) => setExtractedInvoice({...extractedInvoice, ncf: e.target.value})}
-                    className="w-full px-3 py-2 bg-gray-600 border border-gray-500 rounded-md text-white"
-                  />
+                  <div className="flex">
+                    <input
+                      type="text"
+                      value={extractedInvoice.ncf}
+                      onChange={(e) => setExtractedInvoice({...extractedInvoice, ncf: e.target.value})}
+                      className="flex-grow px-3 py-2 bg-gray-600 border border-gray-500 rounded-md text-white"
+                    />
+                    <button
+                      onClick={() => regenerateField('ncf')}
+                      className="ml-2 px-3 py-2 bg-red-600 text-white rounded-md hover:bg-blue-700"
+                      disabled={isRegeneratingNCF}
+                    >
+                      {isRegeneratingNCF ? (
+                        <svg className="animate-spin h-5 w-5" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path></svg>
+                      ) : (
+                        <RefreshCw size={16} />
+                      )}
+                    </button>
+                  </div>
                 </div>
                 {/* New: Payment Type input field */}
                 <div>
@@ -1086,19 +1470,26 @@ ${ocrResult}`;
                       Forma de Pago
                     </div>
                   </label>
-                  <div className="flex items-center gap-2">
+                  <div className="flex">
                     <input
                       type="text"
                       value={extractedInvoice.paymentType}
                       onChange={(e) => setExtractedInvoice({...extractedInvoice, paymentType: e.target.value})}
-                      className="w-full px-3 py-2 bg-gray-600 border border-gray-500 rounded-md text-white"
+                      className="flex-grow px-3 py-2 bg-gray-600 border border-gray-500 rounded-md text-white"
                     />
-                    <button 
-                      onClick={regeneratePaymentType} 
-                      className="px-2 py-1 bg-blue-600 text-white rounded text-xs"
-                      title="Regenerate payment type using AI"
+                    <button
+                      onClick={regeneratePaymentType}
+                      className="ml-2 px-3 py-2 bg-red-600 rounded-md hover:bg-blue-700"
+                      disabled={isRegeneratingPaymentType}
                     >
-                      Regenerate
+                      {isRegeneratingPaymentType ? (
+                        <svg className="animate-spin h-5 w-5" viewBox="0 0 24 24">
+                          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
+                          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/>
+                        </svg>
+                      ) : (
+                        <RefreshCw size={16} />
+                      )}
                     </button>
                   </div>
                 </div>
@@ -1113,20 +1504,26 @@ ${ocrResult}`;
                       Subtotal
                     </div>
                   </label>
-                  <input
-                    type="number"
-                    step="0.01"
-                    value={extractedInvoice.subtotal}
-                    onChange={(e) => {
-                      const subtotal = parseFloat(e.target.value) || 0;
-                      setExtractedInvoice({
-                        ...extractedInvoice, 
-                        subtotal,
-                        total: subtotal + extractedInvoice.tax
-                      });
-                    }}
-                    className="w-full px-3 py-2 bg-gray-600 border border-gray-500 rounded-md text-white"
-                  />
+                  <div className="flex">
+                    <input
+                      type="number"
+                      step="0.01"
+                      value={extractedInvoice.subtotal}
+                      onChange={(e) => setExtractedInvoice({...extractedInvoice, subtotal: parseFloat(e.target.value) || 0})}
+                      className="flex-grow px-3 py-2 bg-gray-600 border border-gray-500 rounded-md text-white"
+                    />
+                    <button
+                      onClick={() => regenerateField('subtotal')}
+                      className="ml-2 px-3 py-2 bg-red-600 text-white rounded-md hover:bg-blue-700"
+                      disabled={isRegeneratingSubtotal}
+                    >
+                      {isRegeneratingSubtotal ? (
+                        <svg className="animate-spin h-5 w-5" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path></svg>
+                      ) : (
+                        <RefreshCw size={16} />
+                      )}
+                    </button>
+                  </div>
                 </div>
 
                 <div>
@@ -1159,7 +1556,7 @@ ${ocrResult}`;
                       Total
                     </div>
                   </label>
-                  <div className="flex items-center gap-2">
+                  <div className="flex">
                     <input
                       type="number"
                       step="0.01"
@@ -1175,14 +1572,21 @@ ${ocrResult}`;
                           subtotal: subtotal > 0 ? subtotal : 0
                         });
                       }}
-                      className="w-full px-3 py-2 bg-gray-600 border border-gray-500 rounded-md text-white font-semibold"
+                      className="flex-grow px-3 py-2 bg-gray-600 border border-gray-500 rounded-md text-white font-semibold"
                     />
-                    <button 
-                      onClick={regenerateTotal} 
-                      className="px-2 py-1 bg-blue-600 text-white rounded text-xs"
-                      title="Regenerate total using AI"
+                    <button
+                      onClick={regenerateTotal}
+                      className="ml-2 px-3 py-2 bg-red-600 rounded-md hover:bg-blue-700"
+                      disabled={isRegeneratingTotal}
                     >
-                      Regenerate
+                      {isRegeneratingTotal ? (
+                        <svg className="animate-spin h-5 w-5" viewBox="0 0 24 24">
+                          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
+                          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/>
+                        </svg>
+                      ) : (
+                        <RefreshCw size={16} />
+                      )}
                     </button>
                   </div>
                 </div>
@@ -1306,6 +1710,12 @@ ${ocrResult}`;
             <pre>{JSON.stringify({ ocrResult, extractedInvoice }, null, 2)}</pre>
           </div>
         )}
+        <button 
+          onClick={handleRegenerateAll}
+          className="mt-4 px-4 py-2 bg-slate-700 hover:bg-slate-800 text-white rounded-md"
+        >
+          Regenerate All Fields
+        </button>
       </div>
     </div>
   );

@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { DollarSign, Receipt, X, Printer, TrendingUp, BarChart as ChartBar, Calendar, Mail, FileText } from 'lucide-react';
+import { DollarSign, Receipt, X, Printer, TrendingUp, BarChart as ChartBar, Calendar, Mail, FileText, Plus } from 'lucide-react';
 import { Employee } from '../types';
 import { supabase } from '../lib/supabase';
 import { sendReceiptEmail } from '../lib/email';
@@ -90,6 +90,9 @@ export function SalesHistoryPage({ currentEmployee, onBack }: SalesHistoryPagePr
 
   // Add state for 606 report generation
   const [is606Loading, setIs606Loading] = useState(false);
+
+  // Add state for regenerate button
+  const [isRegenerated, setIsRegenerated] = useState(false);
 
   useEffect(() => {
     const fetchSalesHistory = async () => {
@@ -886,7 +889,7 @@ export function SalesHistoryPage({ currentEmployee, onBack }: SalesHistoryPagePr
               onClick={() => setActiveTab('report607')}
               className={`px-4 py-2 rounded-md ${
                 activeTab === 'report607'
-                  ? 'bg-[#D80000] text-white'
+                  ? 'bg-slate-700 text-white'
                   : 'bg-gray-800 text-gray-300 hover:bg-gray-700'
               }`}
             >
@@ -899,7 +902,7 @@ export function SalesHistoryPage({ currentEmployee, onBack }: SalesHistoryPagePr
               onClick={() => setActiveTab('overview')}
               className={`px-4 py-2 rounded-md ${
                 activeTab === 'overview'
-                  ? 'bg-[#D80000] text-white'
+                  ? 'bg-slate-700 text-white'
                   : 'bg-gray-800 text-gray-300 hover:bg-gray-700'
               }`}
             >
@@ -912,7 +915,7 @@ export function SalesHistoryPage({ currentEmployee, onBack }: SalesHistoryPagePr
               onClick={() => setActiveTab('receipts')}
               className={`px-4 py-2 rounded-md ${
                 activeTab === 'receipts'
-                  ? 'bg-[#D80000] text-white'
+                  ? 'bg-slate-700 text-white'
                   : 'bg-gray-800 text-gray-300 hover:bg-gray-700'
               }`}
             >
@@ -1123,7 +1126,7 @@ export function SalesHistoryPage({ currentEmployee, onBack }: SalesHistoryPagePr
                     onClick={() => setTimeframe('week')}
                     className={`px-4 py-2 rounded-md ${
                       timeframe === 'week'
-                        ? 'bg-[#D80000] text-white'
+                        ? 'bg-slate-700 text-white'
                         : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
                     }`}
                   >
@@ -1133,7 +1136,7 @@ export function SalesHistoryPage({ currentEmployee, onBack }: SalesHistoryPagePr
                     onClick={() => setTimeframe('month')}
                     className={`px-4 py-2 rounded-md ${
                       timeframe === 'month'
-                        ? 'bg-[#D80000] text-white'
+                        ? 'bg-slate-700 text-white'
                         : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
                     }`}
                   >
@@ -1209,7 +1212,7 @@ export function SalesHistoryPage({ currentEmployee, onBack }: SalesHistoryPagePr
                     className={`px-4 py-2 rounded-md flex items-center gap-2 ${
                       is606Loading
                         ? 'bg-gray-600 text-gray-400 cursor-not-allowed' 
-                        : 'bg-[#D80000] hover:bg-red-700 text-white'
+                        : 'bg-slate-700 hover:bg-slate-800 text-white'
                     }`}
                   >
                     <FileText size={18} />

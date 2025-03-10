@@ -7,6 +7,7 @@ import Tesseract from 'tesseract.js'; // Add Tesseract.js for OCR
 import { saveAs } from 'file-saver'; // Add file-saver for saving files
 import { OcrProcessor } from './OcrProcessor';
 import { OcrInvoicesManager } from './OcrInvoicesManager'; // Dio Rod
+import { WhatsappImagesProcessor } from './WhatsappImagesProcessor'; // Dio Rod
 
 interface OperationsPageProps {
   menuItems: MenuItem[];
@@ -53,6 +54,7 @@ export function OperationsPage({
   const [ocrResult, setOcrResult] = useState<string>('');
   const [showOcrModal, setShowOcrModal] = useState(false);
   const [showOcrInvoicesManager, setShowOcrInvoicesManager] = useState(false);
+  const [showWhatsappImagesProcessor, setShowWhatsappImagesProcessor] = useState(false); // Dio Rod
 
   // Get unique categories from menu items
   const categories = React.useMemo(() => {
@@ -742,7 +744,7 @@ export function OperationsPage({
               <div className="flex gap-2 items-center">
                 <button
                   onClick={() => setShowOcrModal(true)}
-                  className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors flex items-center gap-2"
+                  className="px-4 py-2 bg-red-600 text-white rounded-md hover:bg-blue-700 transition-colors flex items-center gap-2"
                 >
                   <FileScan size={20} />
                   OCR de Recibos
@@ -754,6 +756,14 @@ export function OperationsPage({
                 >
                   <FileScan size={20} className="mr-1" />
                   OCR Invoices Manager
+                </button>
+                {/* New WhatsApp Images button */}
+                <button
+                  onClick={() => setShowWhatsappImagesProcessor(true)}
+                  className="px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 transition-colors flex items-center gap-2" // Dio Rod
+                >
+                  <Plus size={20} className="mr-1" />
+                  WhatsApp Images
                 </button>
                 <div className="text-lg font-semibold text-[#88BDFD]">
                   Total: RD${receipts.reduce((sum, receipt) => sum + receipt.amount, 0).toFixed(2)}
@@ -866,7 +876,7 @@ export function OperationsPage({
                 <button
                   onClick={handleOcr}
                   disabled={!uploadedFile}
-                  className={`mt-4 px-4 py-2 rounded-md ${uploadedFile ? 'bg-blue-600 hover:bg-blue-700 text-white' : 'bg-gray-600 text-gray-400 cursor-not-allowed'}`}
+                  className={`mt-4 px-4 py-2 rounded-md ${uploadedFile ? 'bg-[#D80000] hover:bg-red-700 text-white' : 'bg-gray-600 text-gray-400 cursor-not-allowed'}`}
                 >
                   Perform OCR
                 </button>
@@ -1007,6 +1017,13 @@ export function OperationsPage({
           <OcrInvoicesManager 
             isOpen={true} 
             onClose={() => setShowOcrInvoicesManager(false)} 
+          />
+        )}
+        {/* New WhatsAppImagesProcessor Modal */}
+        {showWhatsappImagesProcessor && (
+          <WhatsappImagesProcessor 
+            isOpen={true}
+            onClose={() => setShowWhatsappImagesProcessor(false)}
           />
         )}
       </main>

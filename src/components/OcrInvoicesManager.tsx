@@ -33,6 +33,7 @@ export function OcrInvoicesManager({ onClose, isOpen }: OcrInvoicesManagerProps)
   const [processing, setProcessing] = useState(false);
   const [sortColumn, setSortColumn] = useState<string>('supplier'); // default sort
   const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc');
+  const [isRegenerated, setIsRegenerated] = useState(false); // Dio Rod
 
   // Add helper function for truncation - Dio Rod
   const truncateText = (text: string): string => {
@@ -68,6 +69,12 @@ export function OcrInvoicesManager({ onClose, isOpen }: OcrInvoicesManagerProps)
     if (!editingInvoice) return;
     try {
       setProcessing(true);
+      // Convert date to ISO format (YYYY-MM-DD)
+      const dateObject = new Date(editingInvoice.date);
+      const formattedDate = isNaN(dateObject.getTime())
+        ? editingInvoice.date
+        : dateObject.toISOString().split('T')[0];
+      
       const { error } = await supabase
         .from('ocr_invoices')
         .update({
@@ -75,7 +82,7 @@ export function OcrInvoicesManager({ onClose, isOpen }: OcrInvoicesManagerProps)
           rcn: editingInvoice.rcn,
           nif: editingInvoice.nif,
           ncf: editingInvoice.ncf,
-          date: editingInvoice.date,
+          date: formattedDate,  // Updated date field to proper ISO format
           invoice_number: editingInvoice.invoice_number,
           subtotal: editingInvoice.subtotal,
           tax: editingInvoice.tax,
@@ -84,7 +91,9 @@ export function OcrInvoicesManager({ onClose, isOpen }: OcrInvoicesManagerProps)
           updated_at: new Date().toISOString()
         })
         .eq('id', editingInvoice.id);
-      if (error) throw error;
+      if (error) {
+        throw error;
+      }
       setInvoices(prev => prev.map(inv => inv.id === editingInvoice.id ? editingInvoice : inv));
       setEditingInvoice(null);
     } catch (err) {
@@ -152,6 +161,11 @@ export function OcrInvoicesManager({ onClose, isOpen }: OcrInvoicesManagerProps)
       setSortColumn(column);
       setSortDirection('asc');
     }
+  };
+
+  const handleGenerate = () => {
+    setIsRegenerated(true);
+    // Dio Rod
   };
 
   if (!isOpen) return null;
@@ -364,6 +378,14 @@ export function OcrInvoicesManager({ onClose, isOpen }: OcrInvoicesManagerProps)
             </div>
           </div>
         )}
+        <button
+          onClick={handleGenerate}
+          className={`flex items-center gap-2 px-4 py-2 rounded-md text-white ${
+            isRegenerated ? 'bg-green-600' : 'bg-blue-600'
+          }`}
+        >
+          {/* ...existing regenerate icon or text... */}
+        </button>
       </div>
     </div>
   );
