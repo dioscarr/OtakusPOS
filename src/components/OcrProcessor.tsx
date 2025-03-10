@@ -1053,21 +1053,33 @@ function generateFullOcrPrompt(ocrRawData: string): string {
   return `
 Please analyze the following OCR raw data and extract a JSON object in this exact format:
 {
-  "supplier": "",
+  "supplier(the name of the business": "",
   "rcn": "",
   "nif": "",
   "ncf": "",
   "date": "",
   "invoiceNumber": "",
   "subtotal": 0,
-  "tax": 0,
+  "tax(itbis)": 0,
   "total": 0,
   "paymentType": ""
 }
 
 Note:
 - Handle cases where the total includes tax (ITBIS) by splitting out subtotal and tax.
-- Return only the JSON object as the response.
+- Return only the JSON object as the response in the following format
+{
+  "supplier(the name of the business": "",
+  "rcn": "",
+  "nif": "",
+  "ncf": "",
+  "date": "",
+  "invoiceNumber": "",
+  "subtotal": 0,
+  "tax(itbis)": 0,
+  "total": 0,
+  "paymentType": ""
+}
 
 OCR Raw Data:
 ${ocrRawData}
@@ -1076,31 +1088,44 @@ ${ocrRawData}
 
 async function handleRegenerateAllFields(ocrRawData: string) {
   try {
-    const prompt = generateFullOcrPrompt(ocrRawData);
-    // Placeholder for actual Anthropic call
-    const response = await someAnthropicApiCall(prompt);
-    // ...handle the response...
-    console.log("Anthropic full OCR fields response", response);
+    regenerateFecha();
+    regenerateSupplier();
+
+   setIsRegeneratingFecha(true);
+    setIsRegeneratingSupplier(true);
+    setIsRegeneratingRCN(true);
+    setIsRegeneratingNIF(true);
+    setIsRegeneratingNCF(true);
+    setIsRegeneratingInvoiceNumber(true);
+    setIsRegeneratingTotal(true);
+    setIsRegeneratingPaymentType(true);
+    setIsRegeneratingSubtotal(true);
+
+    regenerateInvoiceNumber();
+   
+    regenerateTotal();
+    regeneratePaymentType();
+    regenerateSubtotalRCNNCF();
+    
   } catch (err) {
     console.error("Error regenerating all fields:", err);
   }
 }
 
 async function handleRegenerateAll() {
-  if (!onOcrComplete || !ocrRawText) {
-    console.warn("No onOcrComplete function or no OCR data available.");
-    return;
-  }
-  try {
-    const prompt = generateFullOcrPrompt(ocrRawText);
-    console.log("Sending prompt to Anthropic:", prompt);
-    const anthropicResponse = await someAnthropicApiCall(prompt);
-    console.log("Anthropic response:", anthropicResponse);
+   try {
+    regenerateFecha();
+    regenerateSupplier();
 
-    const parsedData = JSON.parse(anthropicResponse);
-    onOcrComplete(parsedData);
-  } catch (error) {
-    console.error("Error regenerating all fields:", error);
+  
+    regenerateInvoiceNumber();
+   
+    regenerateTotal();
+    regeneratePaymentType();
+    regenerateSubtotalRCNNCF();
+    
+  } catch (err) {
+    console.error("Error regenerating all fields:", err);
   }
 }
 
